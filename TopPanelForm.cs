@@ -167,7 +167,7 @@ namespace WispR
                 if ((DateTime.Now - atEdgeSince).TotalMilliseconds >= 90) { atEdgeSince = DateTime.MinValue; OpenPanel(scr, edge.Value); }
                 return;
             }
-            if (closing || seeking || volDragging) return;
+            if (closing || seeking) return;
             // leave: the mouse is away from the panel (and the edge strip above it) for a moment,
             // or you click somewhere else
             var keep = Rectangle.Inflate(screenRect, (int)(14 * s), (int)(14 * s));
@@ -195,13 +195,6 @@ namespace WispR
             Redraw();
             if (!Visible) Show();
             KeepOnTop();
-            volWheel ??= new WheelHook(this, (delta, pt) =>
-            {
-                if (!open || tab != 0 || vol == null) return;
-                float cur = vol.Value.muted ? 0 : vol.Value.level;
-                SetVolume(cur + Math.Sign(delta) * 0.05f);
-            });
-            volWheel.Install();
             tick.Start();
             UpdateSpin();
             float from = slide;
@@ -213,8 +206,6 @@ namespace WispR
             if (!open) return;
             closing = true;
             tick.Stop();
-            volWheel?.Uninstall();
-            volDragging = false;
             void Done()
             {
                 open = closing = false;
@@ -255,7 +246,6 @@ namespace WispR
                     memPct = mem.dwMemoryLoad;
                 }
                 gpu = GpuSensor.Read();
-                if (tab == 0) ReadVolume();
             }
             catch { }
         }
@@ -273,9 +263,7 @@ namespace WispR
             {
                 i.PositionTicks = seekTargetTicks; i.PositionAtUtc = seekAt;
             }
-            bool newSong = i?.Key != info?.Key;
             info = i;
-            if (newSong && open) ReadVolume();
             if (old != null && old != info?.Thumbnail) old.Dispose();
             if (open) { Redraw(); UpdateSpin(); }
         }
@@ -548,72 +536,14 @@ namespace WispR
             var wave = new Rectangle(x, r.Y + (int)(70 * s), w, (int)(36 * s));
             DrawWave(g, wave, i, accent);
 
-            // controls: previous / play-pause / next, centred under the waveform — a little to the left when
-            // the app's own volume slider sits at the right end of the row
-            bool hasVol = vol != null;
-            int cy = r.Bottom - (int)(30 * s), cx = hasVol ? x + (int)(w * 0.33f) : x + w / 2;
-            if (hasVol) DrawVolume(g, Rectangle.FromLTRB(x + w - (int)(124 * s), cy - (int)(16 * s), x + w, cy + (int)(16 * s)), accent);
-            else { volBar = Rectangle.Empty; }
+            // controls: previous / play-pause / next, centred under the waveform
+            int cy = r.Bottom - (int)(30 * s), cx = x + w / 2;
             int ps = (int)(58 * s), bs = (int)(42 * s), gap = (int)(78 * s);
             DrawButton(g, new Rectangle(cx - gap - bs / 2, cy - bs / 2, bs, bs), "", false, media.Previous, accent);
             DrawButton(g, new Rectangle(cx - ps / 2, cy - ps / 2, ps, ps), i.Playing ? "" : "", true,
                 () => { media.PlayPause(); if (info != null) info.Playing = !info.Playing; Redraw(); UpdateSpin(); }, accent);
             DrawButton(g, new Rectangle(cx + gap - bs / 2, cy - bs / 2, bs, bs), "", false, media.Next, accent);
         }
-
-        // ---- the playing app's own volume (like the Volume mixer: for Floorp, all of Floorp) ----
-        string volExe;
-        (float level, bool muted)? vol;
-        Rectangle volBar = Rectangle.Empty;
-        bool volDragging;
-        WheelHook volWheel;
-
-        void ReadVolume()
-        {
-            if (volDragging) return;
-            volExe = info != null ? MediaApps.ExeName(info.AppId) : null;
-            vol = volExe != null ? AppVolume.Get(volExe) : null;
-            if (info != null && vol == null)
-                Log.Throttled("appvol:" + info.Key, "Media volume: no sound session for " + (volExe ?? "(program unknown for " + info.AppId + ")") +
-                    ". Programs with sound right now: " + (AppVolume.LastSeen.Length > 0 ? AppVolume.LastSeen : "none") + ".");
-        }
-
-        void SetVolume(float level)
-        {
-            if (volExe == null || vol == null) return;
-            level = Math.Max(0, Math.Min(1, level));
-            AppVolume.Set(volExe, level);
-            vol = (level, false);
-            Redraw();
-        }
-
-        void DrawVolume(Graphics g, Rectangle r, Color accent)
-        {
-            var v = vol.Value;
-            bool hot = r.Contains(mouse) || volDragging;
-            // speaker: click to mute / unmute
-            var glyphR = new Rectangle(r.X, r.Y, (int)(26 * s), r.Height);
-            string glyph = v.muted || v.level <= 0.001f ? "\uE74F" : v.level < 0.34f ? "\uE993" : v.level < 0.67f ? "\uE994" : "\uE995";
-            if (glyphR.Contains(mouse)) using (var b = new SolidBrush(Color.FromArgb(40, accent))) g.FillEllipse(b, Rectangle.Inflate(glyphR, -(int)(1 * s), (int)(-r.Height / 2 + 13 * s)));
-            DrawText(g, glyph, glyphFont, glyphR, glyphR.Contains(mouse) ? Ui.Mix(accent, T.Text, 0.3f) : T.Text);
-            buttons.Add((glyphR, () => { if (volExe != null && vol != null) { AppVolume.SetMute(volExe, !vol.Value.muted); vol = (vol.Value.level, !vol.Value.muted); } }));
-
-            // the slider
-            int bx = glyphR.Right + (int)(6 * s), bw = r.Right - bx - (int)(6 * s);
-            float th = 4 * s, by = r.Y + r.Height / 2f - (int)(4 * s);
-            volBar = new Rectangle(bx, (int)(by - 8 * s), bw, (int)(16 * s + th));
-            float f = v.muted ? 0 : v.level;
-            var rest = Ui.Mix(T.Surface, T.SubText, 0.32f);
-            using (var p = Ui.Round(new RectangleF(bx, by, bw, th), th / 2)) using (var b = new SolidBrush(rest)) g.FillPath(b, p);
-            if (f > 0) using (var p = Ui.Round(new RectangleF(bx, by, Math.Max(th, bw * f), th), th / 2)) using (var b = new SolidBrush(v.muted ? rest : accent)) g.FillPath(b, p);
-            float kr = (hot ? 7 : 5.5f) * s, kx = bx + bw * f;
-            using (var b = new SolidBrush(hot ? T.Text : Ui.Mix(accent, T.Text, 0.4f))) g.FillEllipse(b, kx - kr, by + th / 2 - kr, kr * 2, kr * 2);
-            // whose volume it is
-            string label = (AppName(info.AppId) is string n && n.Length > 0 ? n : volExe) + " · " + (v.muted ? "muted" : Math.Round(v.level * 100) + "%");
-            DrawText(g, label, smallFont, new Rectangle(bx - (int)(40 * s), (int)(by + 9 * s), bw + (int)(40 * s), (int)(16 * s)), T.SubText, right: true);
-        }
-
-        float VolFrac(int mouseX) => volBar.Width <= 0 ? 0 : Math.Max(0, Math.Min(1, (mouseX - volBar.X) / (float)volBar.Width));
 
         /// <summary>A strong, readable colour from the cover for the controls (falls back to the theme's accent).</summary>
         Color SongAccent()
@@ -828,9 +758,8 @@ namespace WispR
             base.OnMouseMove(e);
             mouse = e.Location;
             if (seeking) { seekFrac = Frac(e.X); Redraw(); return; }
-            if (volDragging) { SetVolume(VolFrac(e.X)); return; }
             int hot = buttons.FindIndex(b => b.r.Contains(mouse));
-            bool track = tab == 0 && (HotTrack() || volBar.Contains(mouse));
+            bool track = tab == 0 && HotTrack();
             Cursor = hot >= 0 || track ? Cursors.Hand : Cursors.Default;
             int hoverKey = track ? 1000 : hot;
             if (hoverKey != lastHover || track) { lastHover = hoverKey; Redraw(); } // the waveform previews where a click lands
@@ -846,16 +775,11 @@ namespace WispR
             {
                 seeking = true; seekFrac = Frac(e.X); Capture = true; Redraw();
             }
-            else if (e.Button == MouseButtons.Left && tab == 0 && vol != null && volBar.Contains(e.Location))
-            {
-                volDragging = true; Capture = true; SetVolume(VolFrac(e.X));
-            }
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
-            if (volDragging) { volDragging = false; Capture = false; Redraw(); return; }
             if (seeking)
             {
                 seeking = false; Capture = false;
@@ -880,7 +804,7 @@ namespace WispR
         {
             if (disposing)
             {
-                foreach (var n in notches.Values) n.Dispose(); volWheel?.Dispose(); watch.Dispose(); tick.Dispose(); Anim.StopFrames(SpinKey); media.Dispose(); vinyl?.Dispose();
+                foreach (var n in notches.Values) n.Dispose(); watch.Dispose(); tick.Dispose(); Anim.StopFrames(SpinKey); media.Dispose(); vinyl?.Dispose();
                 ReleaseBitmap(); under?.Dispose(); over?.Dispose(); shape?.Dispose(); bg?.Dispose();
                 glyphFont?.Dispose(); bigGlyphFont?.Dispose(); tabGlyphFont?.Dispose();
             }
