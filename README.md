@@ -344,6 +344,7 @@ The exe lands in `bin\Release\net48\`.
 | `PreviewForm.cs` | Live window previews when hovering an app |
 | `PerfBoxForm.cs` | The CPU / RAM box with the Task Manager button |
 | `MediaBoxForm.cs`, `MediaService.cs` | The media player box and reading "now playing" from Windows |
+| `WinRtEventSink.cs` | Listens to Windows' media change events (keeps the song length and position up to date) |
 | `Playhead.cs` | WispR's own clock for the song position, so junk reports from apps can't reset it |
 | `VolumePopup.cs` | The volume slider popup |
 | `Calculator.cs` | Maths and unit conversion in the launcher |

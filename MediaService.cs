@@ -46,6 +46,80 @@ namespace WispR
         readonly Thread thread;
         volatile bool stop;
         IntPtr manager;
+
+        // ---- change events (see WinRtEventSink): keep Windows' copy of the sessions fresh, and wake us up ----
+        readonly AutoResetEvent changed = new AutoResetEvent(false);
+        WinRtEventSink sink;
+        readonly System.Collections.Generic.Dictionary<IntPtr, (IntPtr session, long t1, long t2, long t3)> subscribed =
+            new System.Collections.Generic.Dictionary<IntPtr, (IntPtr, long, long, long)>();
+        readonly System.Collections.Generic.List<IntPtr> subscribedOrder = new System.Collections.Generic.List<IntPtr>();
+
+        const int SlotAddTimelineChanged = 25, SlotRemoveTimelineChanged = 26, SlotAddPlaybackChanged = 27,
+                  SlotRemovePlaybackChanged = 28, SlotAddMediaChanged = 29, SlotRemoveMediaChanged = 30;
+        const int SlotManagerAddCurrentChanged = 8, SlotManagerAddSessionsChanged = 10;
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnAddEvent(IntPtr self, IntPtr handler, out long token);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnRemoveEvent(IntPtr self, long token);
+
+        static readonly Guid IID_IUnknown = new Guid("00000000-0000-0000-C000-000000000046");
+
+        static long AddEvent(IntPtr obj, int slot, IntPtr handler)
+        {
+            try { return Slot<FnAddEvent>(obj, slot)(obj, handler, out long token) == 0 ? token : 0; }
+            catch { return 0; }
+        }
+
+        static void RemoveEvent(IntPtr obj, int slot, long token)
+        {
+            if (token == 0) return;
+            try { Slot<FnRemoveEvent>(obj, slot)(obj, token); } catch { }
+        }
+
+        void SubscribeManager()
+        {
+            sink ??= new WinRtEventSink(changed);
+            AddEvent(manager, SlotManagerAddCurrentChanged, sink.Pointer);
+            AddEvent(manager, SlotManagerAddSessionsChanged, sink.Pointer);
+        }
+
+        /// <summary>Listens to this session's timeline, playback and song changes (once per session).</summary>
+        void EnsureSubscribed(IntPtr session)
+        {
+            sink ??= new WinRtEventSink(changed);
+            var iid = IID_IUnknown;
+            if (Marshal.QueryInterface(session, ref iid, out IntPtr identity) != 0) return;
+            Marshal.Release(identity); // only used as the session's identity; the session itself is held below
+            if (subscribed.ContainsKey(identity)) return;
+            Marshal.AddRef(session); // keep it (and so the subscriptions) alive
+            long a = AddEvent(session, SlotAddTimelineChanged, sink.Pointer);
+            long b = AddEvent(session, SlotAddPlaybackChanged, sink.Pointer);
+            long c = AddEvent(session, SlotAddMediaChanged, sink.Pointer);
+            subscribed[identity] = (session, a, b, c);
+            subscribedOrder.Add(identity);
+            Log.Throttled("media-subscribe", "Media: listening to timeline changes" + (a != 0 ? "" : " (not supported by this session)") + ".");
+            while (subscribedOrder.Count > 8) // old sessions (closed tabs, players): let them go
+            {
+                var old = subscribedOrder[0];
+                subscribedOrder.RemoveAt(0);
+                Unsubscribe(old);
+            }
+        }
+
+        void Unsubscribe(IntPtr identity)
+        {
+            if (!subscribed.TryGetValue(identity, out var e)) return;
+            subscribed.Remove(identity);
+            RemoveEvent(e.session, SlotRemoveTimelineChanged, e.t1);
+            RemoveEvent(e.session, SlotRemovePlaybackChanged, e.t2);
+            RemoveEvent(e.session, SlotRemoveMediaChanged, e.t3);
+            try { Marshal.Release(e.session); } catch { }
+        }
+
+        void UnsubscribeAll()
+        {
+            foreach (var id in subscribedOrder.ToArray()) Unsubscribe(id);
+            subscribedOrder.Clear();
+        }
         string lastThumbKey;
         Bitmap lastThumb;
 
@@ -96,18 +170,22 @@ namespace WispR
                 catch
                 {
                     failures++;
+                    UnsubscribeAll();
                     Release(ref manager); // start over next time
                 }
                 try { Updated?.Invoke(info); } catch { }
 
-                // Commands are handled quickly; otherwise check once a second (slower if it keeps failing).
+                // Commands are handled quickly, and a change event from the player (new length, seek, play/pause)
+                // wakes us straight away; otherwise check once a second (slower if it keeps failing).
                 int wait = failures > 3 ? 10000 : 1000;
-                for (int t = 0; t < wait && !stop; t += 50)
+                Thread.Sleep(120); // at most ~8 reads a second, however chatty the player's events are
+                for (int t = 120; t < wait && !stop; t += 50)
                 {
                     if (!commands.IsEmpty) break;
-                    Thread.Sleep(50);
+                    if (changed.WaitOne(50)) break;
                 }
             }
+            UnsubscribeAll();
             Release(ref manager);
         }
 
@@ -120,12 +198,14 @@ namespace WispR
                 try { manager = Await(CallPtr(statics, 6)); } // RequestAsync()
                 finally { Marshal.Release(statics); }
                 if (manager == IntPtr.Zero) return null;
+                SubscribeManager();
             }
 
             IntPtr session = CallPtr(manager, 6); // GetCurrentSession()
             if (session == IntPtr.Zero) { DrainCommands(); return null; }
             try
             {
+                EnsureSubscribed(session);
                 while (commands.TryDequeue(out var command))
                     try { command(session); } catch { }
 
@@ -179,7 +259,7 @@ namespace WispR
                 {
                     loggedMissingKey = info.Key;
                     Log.Write("Media: no song length from " + info.AppId + " (start " + tl.Start + ", end " + tl.End + ", seek " + tl.MinSeek + "–" + tl.MaxSeek +
-                              ", position " + tl.Pos + ", timeline " + (tl.Ok ? "read" : "missing") + ", sessions " + sessionCount + ").");
+                              ", position " + tl.Pos + ", timeline " + (tl.Ok ? "read" : "missing") + ", sessions " + sessionCount + ", change events so far " + (sink?.Fired ?? 0) + ").");
                 }
 
                 return info.Title.Length > 0 || info.Artist.Length > 0 ? info : null;
