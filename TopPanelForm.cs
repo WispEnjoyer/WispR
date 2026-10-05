@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -53,7 +54,11 @@ namespace WispR
         float cpu = -1; long lastIdle, lastTotal;
         double memUsedGb, memTotalGb; float memPct = -1;
         GpuSensor.Reading gpu;
-        readonly List<float> cpuHistory = new List<float>();
+        readonly List<float> cpuHistory = new List<float>(), memHistory = new List<float>(), gpuHistory = new List<float>();
+        DateTime lastSample = DateTime.MinValue;
+        const int HistoryLength = 40;
+        // what the gauges show right now: they glide to each new reading instead of jumping
+        float shownCpu = -1, shownMem = -1, shownGpu = -1;
 
         // hit areas (client coordinates), filled while drawing
         readonly List<(Rectangle r, Action click)> buttons = new List<(Rectangle, Action)>();
@@ -65,7 +70,8 @@ namespace WispR
 
         static readonly Font tabFont = new Font("Segoe UI", 10f), bigFont = new Font("Segoe UI Light", 26f),
             titleFont = new Font("Segoe UI Semibold", 15f), textFont = new Font("Segoe UI", 10.5f),
-            smallFont = new Font("Segoe UI", 8.5f), sideFont = new Font("Segoe UI Semibold", 11f);
+            smallFont = new Font("Segoe UI", 8.5f), sideFont = new Font("Segoe UI Semibold", 11f),
+            valueFont = new Font("Segoe UI Semibold", 19f), labelFont = new Font("Segoe UI Semibold", 8.5f);
         Font glyphFont, bigGlyphFont, tabGlyphFont;
 
         public TopPanelForm(Settings settings, Backdrop backdrop)
@@ -151,6 +157,7 @@ namespace WispR
         void Watch()
         {
             var c = Cursor.Position;
+            if (!open && (DateTime.Now - lastSample).TotalSeconds >= 1) Sample();
             try { UpdateNotches(c); } catch (Exception ex) { Log.Throttled("notch", "Notch: " + ex.Message); }
             bool buttonsDown = (GetAsyncKeyState(0x01) & 0x8000) != 0 || (GetAsyncKeyState(0x02) & 0x8000) != 0;
             if (!open)
@@ -233,8 +240,6 @@ namespace WispR
                     if (lastTotal > 0 && total > lastTotal)
                     {
                         cpu = Math.Max(0, Math.Min(100, 100f * (1f - (float)(idle - lastIdle) / (total - lastTotal))));
-                        cpuHistory.Add(cpu);
-                        if (cpuHistory.Count > 40) cpuHistory.RemoveAt(0);
                     }
                     lastIdle = idle; lastTotal = total;
                 }
@@ -246,8 +251,51 @@ namespace WispR
                     memPct = mem.dwMemoryLoad;
                 }
                 gpu = GpuSensor.Read();
+                if ((DateTime.Now - lastSample).TotalSeconds >= 0.9)
+                {
+                    lastSample = DateTime.Now;
+                    Push(cpuHistory, cpu);
+                    Push(memHistory, memPct);
+                    Push(gpuHistory, gpu.Ok ? gpu.Temp : -1);
+                }
             }
             catch { }
+            if (open && tab == 1 && !Anim.FramesRunning(GaugeKey)) Anim.Frames(GaugeKey, GaugeFrame);
+        }
+
+        static void Push(List<float> list, float v)
+        {
+            if (v < 0) return;
+            list.Add(v);
+            if (list.Count > HistoryLength) list.RemoveAt(0);
+        }
+
+        // ---- the gauges glide to new readings (≤60 redraws a second, only while moving) ----
+        const string GaugeKey = "top-panel-gauges";
+        DateTime lastGauge;
+
+        bool GaugeFrame()
+        {
+            if (!open || tab != 1) return false;
+            var now = DateTime.Now;
+            if ((now - lastGauge).TotalMilliseconds < 15) return true;
+            float dt = (float)Math.Min(0.1, (now - lastGauge).TotalSeconds);
+            lastGauge = now;
+            float k = 1 - (float)Math.Exp(-dt * 9); // ~0.3 s to settle
+            bool moving = false;
+            void Glide(ref float shown, float target)
+            {
+                if (target < 0) { shown = -1; return; }
+                if (shown < 0) { shown = target; moving = true; return; }
+                float d = target - shown;
+                if (Math.Abs(d) < 0.05f) { if (shown != target) { shown = target; moving = true; } return; }
+                shown += d * k; moving = true;
+            }
+            Glide(ref shownCpu, cpu);
+            Glide(ref shownMem, memPct);
+            Glide(ref shownGpu, gpu.Ok ? gpu.Temp : -1);
+            if (moving) Redraw();
+            return moving;
         }
 
         void ApplyMedia(MediaInfo i)
@@ -693,44 +741,115 @@ namespace WispR
 
         void DrawPerformance(Graphics g, Rectangle r)
         {
-            int n = 3, cw = r.Width / n;
+            int n = 3, gap = (int)(14 * s), cw = (r.Width - gap * (n - 1)) / n;
             string F(double v) => v >= 100 ? v.ToString("0") : v.ToString("0.0");
-            Ring(g, new Rectangle(r.X, r.Y, cw, r.Height), cpu < 0 ? 0 : cpu / 100f,
-                cpu < 0 ? "–" : Math.Round(cpu) + "%", "CPU", Environment.ProcessorCount.ToString(), "Threads", Heat(cpu));
-            Ring(g, new Rectangle(r.X + cw, r.Y, cw, r.Height), memPct < 0 ? 0 : memPct / 100f,
-                memPct < 0 ? "–" : F(memUsedGb) + " GB", "Memory", memPct < 0 ? "–" : Math.Round(memPct) + "%", "of " + F(memTotalGb) + " GB", Heat(memPct));
-            // GPU temperature on a 0–100 °C scale; warmer colours from 80 °C (edge) on
-            Ring(g, new Rectangle(r.X + cw * 2, r.Y, cw, r.Height), gpu.Ok ? gpu.Temp / 100f : 0,
-                gpu.Ok ? gpu.Temp + "°C" : "–", gpu.Ok ? "GPU temp" : "GPU temp unavailable",
-                gpu.Ok && gpu.Load >= 0 ? gpu.Load + "%" : gpu.Ok && gpu.Hotspot > 0 ? gpu.Hotspot + "°C" : "",
-                gpu.Ok && gpu.Load >= 0 ? "Usage" : gpu.Ok && gpu.Hotspot > 0 ? "Hotspot" : "",
-                !gpu.Ok ? T.SubText : gpu.Temp >= 90 ? Color.FromArgb(239, 83, 80) : gpu.Temp >= 80 ? Color.FromArgb(255, 167, 38) : T.Accent);
+            Rectangle Cell(int k) => new Rectangle(r.X + k * (cw + gap), r.Y, cw, r.Height);
+
+            float c = shownCpu >= 0 ? shownCpu : cpu;
+            Card(g, Cell(0), "CPU", Environment.ProcessorCount + " threads",
+                 c < 0 ? 0 : c / 100f, c < 0 ? "–" : Math.Round(c) + "%", "in use",
+                 cpuHistory, 0, Math.Max(20, (cpuHistory.Count > 0 ? cpuHistory.Max() : 0) * 1.3f), Heat(cpu));
+
+            float m = shownMem >= 0 ? shownMem : memPct;
+            Card(g, Cell(1), "MEMORY", memPct < 0 ? "" : F(memTotalGb) + " GB",
+                 m < 0 ? 0 : m / 100f, memPct < 0 ? "–" : F(memUsedGb) + " GB", memPct < 0 ? "" : Math.Round(memPct) + "% in use",
+                 memHistory, 0, 100, Heat(memPct));
+
+            float gt = shownGpu >= 0 ? shownGpu : gpu.Temp;
+            string gpuSub = !gpu.Ok ? "" : gpu.Load >= 0 ? gpu.Load + "% load" : gpu.Hotspot > 0 ? "hotspot " + gpu.Hotspot + "°" : "";
+            Color gpuColor = !gpu.Ok ? T.SubText : gpu.Temp >= 90 ? HeatRed : gpu.Temp >= 80 ? HeatOrange : T.Accent;
+            Card(g, Cell(2), "GPU", gpu.Ok && gpu.Hotspot > 0 && gpu.Load >= 0 ? "hotspot " + gpu.Hotspot + "°" : "",
+                 gpu.Ok ? gt / 100f : 0, gpu.Ok ? Math.Round(gt) + "°C" : "–", gpu.Ok ? gpuSub : "temperature unavailable",
+                 gpuHistory, 30, 100, gpuColor);
         }
 
-        /// <summary>Accent normally; warmer as it gets busy.</summary>
-        Color Heat(float pct) => pct >= 90 ? Color.FromArgb(239, 83, 80) : pct >= 75 ? Color.FromArgb(255, 167, 38) : T.Accent;
+        static readonly Color HeatOrange = Color.FromArgb(255, 167, 38), HeatRed = Color.FromArgb(239, 83, 80);
 
-        void Ring(Graphics g, Rectangle cell, float value, string big, string label, string side, string sideLabel, Color color)
+        /// <summary>Accent normally; warmer as it gets busy.</summary>
+        Color Heat(float pct) => pct >= 90 ? HeatRed : pct >= 75 ? HeatOrange : T.Accent;
+
+        /// <summary>
+        /// One reading as a card: a header (name, detail), a gauge with the value in the middle, and a small
+        /// graph of the last 40 seconds along the bottom.
+        /// </summary>
+        void Card(Graphics g, Rectangle cell, string title, string detail, float value, string big, string caption,
+                  List<float> history, float lo, float hi, Color color)
         {
-            float d = Math.Min(cell.Height, cell.Width * 0.78f), thick = 9 * s;
-            var c = new RectangleF(cell.X + (cell.Width - d) / 2, cell.Y + (cell.Height - d) / 2, d, d);
-            var arc = RectangleF.Inflate(c, -thick / 2, -thick / 2);
-            const float start = 135, sweep = 270; // open at the bottom
-            using (var pen = new Pen(Color.FromArgb(70, color), thick) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                g.DrawArc(pen, arc, start, sweep);
-            float v = Math.Max(0.005f, Math.Min(1, value));
-            using (var pen = new Pen(color, thick) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                g.DrawArc(pen, arc, start, sweep * v);
-            var center = new Rectangle((int)c.X, (int)(c.Y + c.Height / 2 - 30 * s), (int)c.Width, (int)(36 * s));
-            DrawText(g, big, bigFont, center, T.Text);
-            DrawText(g, label, smallFont, new Rectangle((int)c.X, center.Bottom, (int)c.Width, (int)(18 * s)), T.SubText);
-            // the second value sits centred in the ring's opening at the bottom
-            if (!string.IsNullOrEmpty(side))
+            // the card
+            using (var p = Ui.Round(cell, 14 * s))
             {
-                var sv = new Rectangle((int)c.X, (int)(c.Bottom - 34 * s), (int)c.Width, (int)(20 * s));
-                DrawText(g, side, sideFont, sv, T.Text);
-                DrawText(g, sideLabel, smallFont, new Rectangle(sv.X, sv.Bottom - (int)(2 * s), sv.Width, (int)(16 * s)), T.SubText);
+                using (var b = new SolidBrush(Color.FromArgb(T.IsLight ? 150 : 110, T.Surface))) g.FillPath(b, p);
+                using (var pen = new Pen(Color.FromArgb(40, T.Text))) g.DrawPath(pen, p);
             }
+            int pad = (int)(14 * s);
+
+            // header: a coloured dot and the name, the detail on the right
+            int hy = cell.Y + (int)(10 * s), hh = (int)(18 * s);
+            using (var b = new SolidBrush(color)) g.FillEllipse(b, cell.X + pad, hy + hh / 2f - 3 * s, 6 * s, 6 * s);
+            DrawText(g, title, labelFont, new Rectangle(cell.X + pad + (int)(12 * s), hy, cell.Width / 2, hh), T.SubText, left: true);
+            if (!string.IsNullOrEmpty(detail))
+                DrawText(g, detail, smallFont, new Rectangle(cell.X + cell.Width / 2, hy, cell.Width / 2 - pad, hh), T.SubText, right: true);
+
+            // the graph along the bottom
+            int graphH = (int)(42 * s);
+            var graph = new Rectangle(cell.X + 1, cell.Bottom - graphH - 1, cell.Width - 2, graphH);
+            DrawHistory(g, graph, history, lo, hi, color, cell);
+
+            // the gauge, between header and graph
+            int top = hy + hh + (int)(4 * s), bottom = graph.Top + (int)(6 * s);
+            float d = Math.Min(bottom - top, cell.Width - pad * 4);
+            var c = new RectangleF(cell.X + (cell.Width - d) / 2f, top + (bottom - top - d) / 2f, d, d);
+            float thick = 7 * s;
+            var arc = RectangleF.Inflate(c, -thick / 2 - 3 * s, -thick / 2 - 3 * s);
+            const float start = 135, sweep = 270; // open at the bottom
+            using (var pen = new Pen(Color.FromArgb(45, color), thick) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                g.DrawArc(pen, arc, start, sweep);
+            float v = Math.Max(0.004f, Math.Min(1, value)), end = start + sweep * v;
+            using (var path = new GraphicsPath())
+            {
+                path.AddArc(arc, start, sweep * v);
+                // a soft glow under the filled part
+                using (var glow = new Pen(Color.FromArgb(45, color), thick * 2.4f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawPath(glow, path);
+                using (var pen = new Pen(color, thick) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawPath(pen, path);
+            }
+            // a bright dot at the tip
+            double a = end * Math.PI / 180;
+            float tx = arc.X + arc.Width / 2 + (float)Math.Cos(a) * arc.Width / 2, ty = arc.Y + arc.Height / 2 + (float)Math.Sin(a) * arc.Height / 2;
+            using (var b = new SolidBrush(Ui.Mix(color, Color.White, 0.55f))) g.FillEllipse(b, tx - thick * 0.32f, ty - thick * 0.32f, thick * 0.64f, thick * 0.64f);
+
+            // the value in the middle, the caption under it
+            var mid = new Rectangle((int)c.X, (int)(c.Y + c.Height / 2 - 22 * s), (int)c.Width, (int)(34 * s));
+            DrawText(g, big, valueFont, mid, T.Text);
+            if (!string.IsNullOrEmpty(caption))
+                DrawText(g, caption, smallFont, new Rectangle((int)c.X - (int)(10 * s), mid.Bottom - (int)(2 * s), (int)c.Width + (int)(20 * s), (int)(16 * s)), T.SubText);
+        }
+
+        /// <summary>The last 40 seconds as a soft area graph, fading out towards the top, clipped to the card.</summary>
+        void DrawHistory(Graphics g, Rectangle r, List<float> history, float lo, float hi, Color color, Rectangle card)
+        {
+            if (history.Count < 2) return;
+            var st = g.Save();
+            using (var clip = Ui.Round(card, 14 * s)) g.SetClip(clip, CombineMode.Intersect);
+            int count = HistoryLength;
+            float step = r.Width / (float)(count - 1);
+            var pts = new List<PointF>();
+            int offset = count - history.Count; // newest on the right
+            for (int k = 0; k < history.Count; k++)
+            {
+                float f = Math.Max(0, Math.Min(1, (history[k] - lo) / Math.Max(1, hi - lo)));
+                pts.Add(new PointF(r.X + (offset + k) * step, r.Bottom - 2 * s - f * (r.Height - 4 * s)));
+            }
+            using (var area = new GraphicsPath())
+            {
+                area.AddCurve(pts.ToArray(), 0.4f);
+                area.AddLine(pts[pts.Count - 1].X, pts[pts.Count - 1].Y, pts[pts.Count - 1].X, r.Bottom + 2);
+                area.AddLine(pts[pts.Count - 1].X, r.Bottom + 2, pts[0].X, r.Bottom + 2);
+                area.CloseFigure();
+                using (var fill = new LinearGradientBrush(new RectangleF(r.X, r.Y - 1, r.Width, r.Height + 3), Color.FromArgb(95, color), Color.FromArgb(0, color), LinearGradientMode.Vertical))
+                    g.FillPath(fill, area);
+            }
+            using (var pen = new Pen(Color.FromArgb(170, color), 1.6f * s) { LineJoin = LineJoin.Round }) g.DrawCurve(pen, pts.ToArray(), 0.4f);
+            g.Restore(st);
         }
 
         // ---------- text helpers (GDI+ text: it keeps the transparency right) ----------
