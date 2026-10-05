@@ -262,6 +262,8 @@ namespace WispR
                               ", position " + tl.Pos + ", timeline " + (tl.Ok ? "read" : "missing") + ", sessions " + sessionCount + ", change events so far " + (sink?.Fired ?? 0) + ").");
                 }
 
+                if (info.DurationTicks <= 0 && info.Playing && info.Title.Length > 0 && Refresh(session, info))
+                    info.Playing = PlaybackStatus(session) == 4; // it's playing again (checked inside)
                 return info.Title.Length > 0 || info.Artist.Length > 0 ? info : null;
             }
             finally { Marshal.Release(session); }
@@ -270,6 +272,65 @@ namespace WispR
 
         string loggedMissingKey;
         int sessionCount = -1;
+
+        // ---------- making the player report the song's length ----------
+        // Firefox-based browsers (YouTube in Floorp) hand Windows the song's length only when playback
+        // changes state, so it can be missing for the whole song. Pausing and playing again makes them send
+        // it. Done carefully: only for a song that's playing without a length, at most twice per song,
+        // waiting until the player has really paused before playing again, then checking it plays (and
+        // asking again if not) — so a song is never left paused. One reader at a time (the top panel and
+        // the media box each have their own).
+        static readonly object refreshLock = new object();
+        static string refreshKey;
+        static int refreshCount;
+        static DateTime firstSeenWithoutLength, lastRefresh;
+
+        bool Refresh(IntPtr session, MediaInfo info)
+        {
+            lock (refreshLock)
+            {
+                var now = DateTime.UtcNow;
+                if (info.Key != refreshKey) { refreshKey = info.Key; refreshCount = 0; firstSeenWithoutLength = now; return false; }
+                if (refreshCount >= 2) return false;                                    // twice didn't help: leave it
+                double waited = (now - firstSeenWithoutLength).TotalSeconds;
+                if (waited < (refreshCount == 0 ? 0.6 : 4) || (now - lastRefresh).TotalSeconds < 3) return false;
+                refreshCount++;
+                lastRefresh = now;
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                Fire(CallPtr(session, 11));                                              // TryPauseAsync
+                bool paused = WaitForStatus(session, s => s != 4, 700);                  // 4 = Playing
+                long pausedAfter = sw.ElapsedMilliseconds;
+                bool playing = false;
+                for (int attempt = 0; attempt < 4 && !playing; attempt++)
+                {
+                    Fire(CallPtr(session, 10));                                          // TryPlayAsync
+                    playing = WaitForStatus(session, s => s == 4, attempt == 0 ? 900 : 600);
+                }
+                Log.Write("Media: " + info.AppId + " didn't report the song length — paused and resumed to make it (" +
+                          (paused ? "paused after " + pausedAfter + " ms" : "didn't pause") + ", " +
+                          (playing ? "playing again after " + sw.ElapsedMilliseconds + " ms" : "COULDN'T RESUME") + ", try " + refreshCount + ").");
+                return true;
+            }
+        }
+
+        static int PlaybackStatus(IntPtr session)
+        {
+            IntPtr playback = CallPtr(session, SlotGetPlayback);
+            if (playback == IntPtr.Zero) return -1;
+            try { return CallInt(playback, 7); } finally { Marshal.Release(playback); }
+        }
+
+        static bool WaitForStatus(IntPtr session, Func<int, bool> ok, int ms)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (true)
+            {
+                if (ok(PlaybackStatus(session))) return true;
+                if (sw.ElapsedMilliseconds >= ms) return false;
+                Thread.Sleep(10);
+            }
+        }
 
         struct Timeline { public bool Ok; public long Start, End, MinSeek, MaxSeek, Pos, Updated; public long Duration; }
 
