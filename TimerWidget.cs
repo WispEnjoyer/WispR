@@ -142,16 +142,47 @@ namespace WispR
         const string PulseKey = "timer-pulse";
         DateTime lastPulse;
 
-        // Windows' own alarm sound, played once (it used to loop until ticked off, which was too much)
+        // A soft three-note bell ("ding ding ding"), made here — no file needed. Played once.
         void PlayChime()
         {
             try
             {
-                string wav = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"Media\Alarm01.wav");
-                if (System.IO.File.Exists(wav)) { chime ??= new System.Media.SoundPlayer(wav); chime.Play(); }
-                else System.Media.SystemSounds.Exclamation.Play();
+                chime ??= new System.Media.SoundPlayer(new System.IO.MemoryStream(Bell()));
+                chime.Play();
             }
-            catch { }
+            catch { try { System.Media.SystemSounds.Asterisk.Play(); } catch { } }
+        }
+
+        static byte[] Bell()
+        {
+            const int rate = 44100;
+            // three gentle notes (E5, G5, C6), each a soft sine with a little shimmer, fading out
+            var notes = new[] { (f: 659.25, at: 0.00), (f: 783.99, at: 0.16), (f: 1046.5, at: 0.32) };
+            int n = (int)(rate * 1.6);
+            var pcm = new short[n];
+            foreach (var note in notes)
+            {
+                int start = (int)(note.at * rate);
+                for (int i = start; i < n; i++)
+                {
+                    double t = (i - start) / (double)rate;
+                    double attack = Math.Min(1, t / 0.012);                 // no click at the start
+                    double env = attack * Math.Exp(-t * 3.2);               // bell-like fade
+                    double v = Math.Sin(2 * Math.PI * note.f * t) * 0.8 + Math.Sin(2 * Math.PI * note.f * 2.01 * t) * 0.12;
+                    int s16 = pcm[i] + (int)(v * env * 0.16 * short.MaxValue); // quiet: ~16 % of full scale per note
+                    pcm[i] = (short)Math.Max(short.MinValue, Math.Min(short.MaxValue, s16));
+                }
+            }
+            using var ms = new System.IO.MemoryStream();
+            using (var w = new System.IO.BinaryWriter(ms, System.Text.Encoding.ASCII, true))
+            {
+                w.Write(System.Text.Encoding.ASCII.GetBytes("RIFF")); w.Write(36 + n * 2); w.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+                w.Write(System.Text.Encoding.ASCII.GetBytes("fmt ")); w.Write(16); w.Write((short)1); w.Write((short)1);
+                w.Write(rate); w.Write(rate * 2); w.Write((short)2); w.Write((short)16);
+                w.Write(System.Text.Encoding.ASCII.GetBytes("data")); w.Write(n * 2);
+                foreach (var v in pcm) w.Write(v);
+            }
+            return ms.ToArray();
         }
 
         void StopChimeIfQuiet()
