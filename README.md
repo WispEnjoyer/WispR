@@ -1,27 +1,67 @@
+<div align="center">
+
+<img src="docs/logo.png" width="128" alt="WispR logo">
+
 # WispR
 
-A small (~250 KB) replacement for the Windows Start menu **and taskbar** (Windows 10/11).
+**A light, smooth Start menu and taskbar for Windows.**
 
-- Tap the **Windows key** → the launcher rises out of the bottom edge of the screen; type part
-  of an app's name, press **Enter**. (Settings → General → Position: attached to the
-  bottom edge, middle or top.)
-- **Double-tap** the Windows key → hide/show the taskbar and system box.
-- A floating, centered **taskbar** with your pinned and running apps, and a separate
-  **system box** with tray icons, keyboard layout, network, volume, battery, clock and
-  notifications — all in the same style as the launcher.
+<a href="../../releases/latest"><img src="https://img.shields.io/badge/download-latest-8b7cf6?style=flat-square" alt="Download"></a>
+<img src="https://img.shields.io/badge/Windows-10%20%7C%2011-5b8def?style=flat-square" alt="Windows 10 | 11">
+<img src="https://img.shields.io/badge/.NET%20Framework-4.8-7c6fd6?style=flat-square" alt=".NET Framework 4.8">
+<img src="https://img.shields.io/badge/size-~500%20KB-3fb6c8?style=flat-square" alt="~500 KB">
 
-No install, no runtime download — it uses .NET Framework 4.8, which is built into Windows.
+</div>
 
-## Run it
+<br>
 
-1. Put `WispR.exe` somewhere permanent, e.g. `C:\Tools\WispR\`.
-2. Double-click it. A small blue-squares icon appears in the tray.
-3. Right-click the tray icon → **Start with Windows** to launch it at login.
+Tap the **Windows key** and a launcher rises out of the bar. Type a few letters, press **Enter**.
+Everything around it — taskbar, tray, Start menu, popups — is drawn in one consistent style,
+animated at your monitor's refresh rate.
 
-Windows SmartScreen may warn the first time because the exe isn't code-signed:
-click **More info → Run anyway**.
+## ✨ Features
 
-## Taskbar
+- **Launcher** — fuzzy app search that learns what you use, plus a calculator, unit conversion and Windows settings search
+- **Taskbar & Start menu** — pinned and running apps with live previews; popups that grow out of the bar
+- **Screen frame** — an optional rounded border around the whole desktop that the bars sit in
+- **Top drop-down** — touch the notch at the top edge for
+  - 🎵 **Media**: cover, a spinning vinyl coloured from the cover, a seekable waveform
+  - 📊 **Performance**: CPU, memory and GPU temperature
+- **Wallpapers** — a carousel of your pictures or Wallpaper Engine favourites
+- **Themes** — 8 built-in themes, your own colours, or colours taken from your wallpaper
+
+## 🚀 Getting started
+
+1. Download **WispR.zip** from the [latest release](../../releases/latest) and unzip it somewhere permanent.
+2. Run **`WispR.exe`**. *(SmartScreen may ask once: **More info → Run anyway**.)*
+3. Right-click the tray icon → **Start with Windows**.
+
+Settings: right-click the tray icon or an empty spot on the bar → **Settings…**
+
+> [!TIP]
+> If Windows' own taskbar ever stays hidden (e.g. after force-closing WispR), run
+> **Restore Windows taskbar.bat** from the zip, or `WispR.exe --restore-taskbar`.
+
+## ⌨️ Keys
+
+| Key | Action |
+|---|---|
+| <kbd>Win</kbd> | Open / close the launcher |
+| <kbd>Win</kbd> <kbd>Win</kbd> (double-tap) | Hide / show the bars |
+| <kbd>Enter</kbd> | Launch · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> as administrator |
+| <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Tab</kbd> | Move the selection |
+| <kbd>Esc</kbd> | Clear the search, then close |
+| <kbd>Shift</kbd>+<kbd>F10</kbd> | Right-click menu for the selected app |
+| <kbd>Ctrl</kbd>+<kbd>Esc</kbd> | Still opens the real Windows Start menu |
+
+All other Windows shortcuts (<kbd>Win</kbd>+<kbd>E</kbd>, <kbd>Win</kbd>+<kbd>L</kbd>, <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>…) keep working.
+
+**Try typing:** `15*9` · `19% of 250` · `5 km in miles` · `bluetooth` · `dark mode` · `wallpaper`
+
+## 📖 Everything in detail
+
+<details>
+<summary><b>Taskbar, system box & Start menu</b></summary>
 
 The Windows taskbar is hidden while WispR's is on, and put back exactly as it was when
 you exit WispR or turn its taskbar off.
@@ -102,7 +142,10 @@ had to repair) at `%APPDATA%\WispR\log.txt`. Right-click the WispR tray icon →
 Task Manager): run **Restore Windows taskbar.bat** from the zip, or
 `WispR.exe --restore-taskbar`.
 
-## Settings
+</details>
+
+<details>
+<summary><b>Settings</b></summary>
 
 Right-click the WispR icon in the tray (or an empty spot on the bars) → **Settings…**.
 Everything applies instantly and is saved to `%APPDATA%\WispR\settings.ini`.
@@ -144,7 +187,10 @@ live when you pick another one):
   engine, the Start menu name and account picture, start with Windows.
 - **Preview launcher** (bottom left) opens the launcher so you can see your changes.
 
-## Right-click menu
+</details>
+
+<details>
+<summary><b>Right-click menu</b></summary>
 
 Right-click any result (or press the Menu key / Shift+F10):
 
@@ -165,25 +211,10 @@ the shortcut selected: right-click it → **Pin to taskbar**.)
 You can also **drag** an app out of WispR: onto the desktop or into a folder to
 create a shortcut, or (on Windows 10) onto the taskbar to pin it.
 
-## Keys
+</details>
 
-| Key | Action |
-|---|---|
-| Windows (tap) | Open / close the launcher |
-| Windows (double-tap) | Hide / show the taskbar and system box |
-| Type | Search apps |
-| ↑ ↓ / Tab | Move selection |
-| Enter | Launch |
-| Ctrl+Shift+Enter | Launch as administrator |
-| Esc | Clear search, then close |
-| Menu key / Shift+F10 | Right-click menu for the selected app |
-| Ctrl+Esc | Still opens the real Windows Start menu |
-
-All Windows-key shortcuts (Win+E, Win+L, Win+Shift+S, Win+V…) keep working —
-only a lone tap of the key is taken over. To get the normal Start menu back
-temporarily, untick **Replace Windows key Start menu** in the tray menu.
-
-## Calculator, units and Windows settings
+<details>
+<summary><b>Calculator, units & Windows settings</b></summary>
 
 The launcher works out what you mean:
 
@@ -199,7 +230,10 @@ The launcher works out what you mean:
 
 App names that contain numbers ("7-Zip", "Office 365") are still treated as app searches.
 
-## Wallpaper picker
+</details>
+
+<details>
+<summary><b>Wallpaper picker & Wallpaper Engine</b></summary>
 
 Type **`wallpaper`** (or `>wallpaper`, `hintergrund`) in the launcher for a carousel of your
 wallpapers — an endless loop in both directions. The selected one is shown large in the middle; under each picture are five
@@ -235,7 +269,10 @@ Wallpaper Engine plays a wallpaper, they use that wallpaper's preview picture. T
 launcher sit above the desktop, so Wallpaper Engine keeps animating underneath them; it also
 pauses as usual when an app is fullscreen.
 
-## How the search works
+</details>
+
+<details>
+<summary><b>How the search works</b></summary>
 
 Results are ranked in tiers, best first:
 
@@ -259,7 +296,10 @@ Microsoft Store apps, with their real icons), refreshed in the background.
 
 Usage history lives in `%APPDATA%\WispR\usage.txt` — delete it to reset learning.
 
-## Known limitations
+</details>
+
+<details>
+<summary><b>Known limitations</b></summary>
 
 - With monitors at different scaling (e.g. 150 % and 100 %), bars on the second monitor may
   look slightly soft.
@@ -271,7 +311,9 @@ Task Manager), Windows doesn't let a normal app see the keypress, so the real
 Start menu opens instead. To fix that, run WispR itself as administrator
 (e.g. via Task Scheduler "Run with highest privileges" at logon).
 
-## Build from source
+</details>
+
+## 🛠️ Building
 
 Requires the .NET SDK (8 or newer) on Windows:
 
@@ -280,6 +322,9 @@ dotnet build -c Release
 ```
 
 The exe lands in `bin\Release\net48\`.
+
+<details>
+<summary><b>What each file does</b></summary>
 
 | File | What it does |
 |---|---|
@@ -312,6 +357,8 @@ The exe lands in `bin\Release\net48\`.
 | `TrayMenus.cs` | Shows tray icons' right-click menus in WispR's style |
 | `GrowOut.cs` | The "grows out of the bar" look for popups |
 | `Vinyl.cs` | The spinning record in the Media tab |
+| `Notch.cs` | The little tab at the top edge that marks the drop-down |
+| `MediaApps.cs` | Readable names for media apps (e.g. Floorp instead of a code) |
 | `TopPanelForm.cs` | The drop-down from the top edge (media + performance) |
 | `FrameForm.cs` | The border around the whole screen |
 | `WinEvents.cs` | Window events, so the bars react instantly to maximize/fullscreen |
@@ -325,3 +372,6 @@ The exe lands in `bin\Release\net48\`.
 | `Native.cs` | Shared Windows API declarations |
 | `Log.cs` | The diagnostic log |
 | `Program.cs` | Tray icon, menu, autostart |
+
+</details>
+
