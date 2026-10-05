@@ -30,6 +30,37 @@ namespace WispR
             return name ?? "";
         }
 
+        static readonly Dictionary<string, (string exe, DateTime at)> exeCache = new Dictionary<string, (string, DateTime)>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>The program behind a media session, as a file name without ".exe" ("floorp", "spotify"), or null.</summary>
+        public static string ExeName(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            if (exeCache.TryGetValue(id, out var c) && (c.exe != null || DateTime.UtcNow - c.at < TimeSpan.FromMinutes(1))) return c.exe;
+            string exe = null;
+            try
+            {
+                string s = id.Split('!')[0];
+                if (Regex.IsMatch(s, "^[0-9A-Fa-f]{12,}$"))
+                {
+                    // the browser's window carries the same code: its process is the program
+                    EnumWindows((h, _) =>
+                    {
+                        if (!IsWindowVisible(h) || !(WindowAppId(h) is string w) || !w.Equals(s, StringComparison.OrdinalIgnoreCase)) return true;
+                        GetWindowThreadProcessId(h, out uint pid);
+                        string path = ProcessPath(pid);
+                        if (path != null) exe = Path.GetFileNameWithoutExtension(path);
+                        return exe == null;
+                    }, IntPtr.Zero);
+                }
+                else if (s.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) exe = Path.GetFileNameWithoutExtension(s);
+                else if (s.IndexOf('_') < 0 && s.IndexOf('.') < 0) exe = s; // e.g. "Chrome", "Spotify"
+            }
+            catch { }
+            exeCache[id] = (exe, DateTime.UtcNow);
+            return exe;
+        }
+
         static string Resolve(string id)
         {
             string s = id.Split('!')[0];

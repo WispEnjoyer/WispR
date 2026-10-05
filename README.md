@@ -25,7 +25,7 @@ animated at your monitor's refresh rate.
 - **Taskbar & Start menu** — pinned and running apps with live previews; popups that grow out of the bar
 - **Screen frame** — an optional rounded border around the whole desktop that the bars sit in
 - **Top drop-down** — touch the notch at the top edge for
-  - 🎵 **Media**: cover, a spinning vinyl coloured from the cover, a seekable waveform
+  - 🎵 **Media**: cover, a spinning vinyl coloured from the cover, a seekable waveform, and the playing app's own volume
   - 📊 **Performance**: CPU, memory and GPU temperature
 - **Wallpapers** — a carousel of your pictures or Wallpaper Engine favourites
 - **Themes** — 8 built-in themes, your own colours, or colours taken from your wallpaper
@@ -345,6 +345,7 @@ The exe lands in `bin\Release\net48\`.
 | `PerfBoxForm.cs` | The CPU / RAM box with the Task Manager button |
 | `MediaBoxForm.cs`, `MediaService.cs` | The media player box and reading "now playing" from Windows |
 | `WinRtEventSink.cs` | Listens to Windows' media change events (keeps the song length and position up to date) |
+| `AppVolume.cs` | One app's own volume (like the Volume mixer), for the slider in the Media tab |
 | `Playhead.cs` | WispR's own clock for the song position, so junk reports from apps can't reset it |
 | `VolumePopup.cs` | The volume slider popup |
 | `Calculator.cs` | Maths and unit conversion in the launcher |
