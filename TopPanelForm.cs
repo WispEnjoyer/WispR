@@ -573,6 +573,9 @@ namespace WispR
             if (volDragging) return;
             volExe = info != null ? MediaApps.ExeName(info.AppId) : null;
             vol = volExe != null ? AppVolume.Get(volExe) : null;
+            if (info != null && vol == null)
+                Log.Throttled("appvol:" + info.Key, "Media volume: no sound session for " + (volExe ?? "(program unknown for " + info.AppId + ")") +
+                    ". Programs with sound right now: " + (AppVolume.LastSeen.Length > 0 ? AppVolume.LastSeen : "none") + ".");
         }
 
         void SetVolume(float level)

@@ -15,6 +15,9 @@ namespace WispR
         static Guid ctx = Guid.NewGuid(); // marks changes as ours
 
         /// <summary>The app's volume (0–1) and whether it's muted, or null when it has no sound session right now.</summary>
+        /// <summary>For the log: which programs currently have sound sessions.</summary>
+        public static string LastSeen = "";
+
         public static (float level, bool muted)? Get(string exeName)
         {
             float? level = null; bool muted = false;
@@ -49,20 +52,24 @@ namespace WispR
                 mgr = (IAudioSessionManager2)o;
                 if (mgr.GetSessionEnumerator(out list) != 0 || list == null) return;
                 list.GetCount(out int n);
+                var seen = new List<string>();
                 for (int i = 0; i < n; i++)
                 {
                     if (list.GetSession(i, out IAudioSessionControl2 s) != 0 || s == null) continue;
                     try
                     {
                         if (s.GetProcessId(out uint pid) != 0 || pid == 0) continue;
-                        if (!string.Equals(NameOf(pid), exeName, StringComparison.OrdinalIgnoreCase)) continue;
+                        string pn = NameOf(pid);
+                        if (pn != null && !seen.Contains(pn)) seen.Add(pn);
+                        if (!string.Equals(pn, exeName, StringComparison.OrdinalIgnoreCase)) continue;
                         if (s is ISimpleAudioVolume v) action(v);
                     }
                     catch { }
                     finally { Marshal.ReleaseComObject(s); }
                 }
+                LastSeen = string.Join(", ", seen);
             }
-            catch { }
+            catch (Exception ex) { LastSeen = "error: " + ex.GetType().Name + " " + ex.Message; }
             finally
             {
                 if (list != null) Marshal.ReleaseComObject(list);

@@ -57,6 +57,9 @@ namespace WispR
                 else if (s.IndexOf('_') < 0 && s.IndexOf('.') < 0) exe = s; // e.g. "Chrome", "Spotify"
             }
             catch { }
+            // no window carries the code (the name came from the registry): the program is usually named
+            // like the app ("Floorp" → floorp.exe)
+            if (exe == null) { string n = Name(id); if (!string.IsNullOrEmpty(n) && n.IndexOf(' ') < 0) exe = n.ToLowerInvariant(); }
             exeCache[id] = (exe, DateTime.UtcNow);
             return exe;
         }
