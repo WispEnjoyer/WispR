@@ -13,11 +13,12 @@ namespace WispR
 {
     sealed class ResultItem
     {
-        public enum Kind { App, Run, Web, Calc, Setting }
+        public enum Kind { App, Run, Web, Calc, Setting, Timer }
         public Kind Type;
         public AppEntry Entry;
         public string Title, Subtitle, Text;
         public SettingsCatalog.Page Page;
+        public TimeSpan TimerLength; // Timer: how long (zero = no time given yet)
     }
 
     /// <summary>The popup: a search box with a list of results underneath.</summary>
@@ -584,6 +585,19 @@ namespace WispR
             }
             else
             {
+                // "set timer 10m", "set timer "Brot backen" 10m": a timer, and nothing else
+                if (Timers.TryParse(raw, out var timerTitle, out var timerLength))
+                {
+                    items.Add(timerLength > TimeSpan.Zero
+                        ? new ResultItem { Type = ResultItem.Kind.Timer, TimerLength = timerLength, Text = timerTitle,
+                                           Title = (timerTitle.Length > 0 ? timerTitle + " — " : "Timer — ") + Timers.Describe(timerLength),
+                                           Subtitle = "Start a timer   ·   it shows on the right edge of the screen" }
+                        : new ResultItem { Type = ResultItem.Kind.Timer, Text = timerTitle,
+                                           Title = "How long?", Subtitle = "e.g.  set timer 10m   ·   timer 1h30m   ·   set timer \"Brot backen\" 10m" });
+                    ShowItems(items);
+                    return;
+                }
+
                 // Maths / unit conversion: if it clearly is one, the answer goes first.
                 var answer = Calculator.TryAnswer(raw);
                 if (answer != null)
@@ -609,6 +623,11 @@ namespace WispR
                     items.Add(new ResultItem { Type = ResultItem.Kind.Web, Text = raw, Title = "Search the web for  " + raw, Subtitle = settings.SearchEngine });
             }
 
+            ShowItems(items);
+        }
+
+        void ShowItems(List<ResultItem> items)
+        {
             list.BeginUpdate();
             list.Items.Clear();
             list.Items.AddRange(items.ToArray());
@@ -816,6 +835,7 @@ namespace WispR
 
         void Launch(ResultItem it, bool admin)
         {
+            if (it.Type == ResultItem.Kind.Timer && it.TimerLength <= TimeSpan.Zero) return; // no time typed yet
             string q = Matcher.Normalize(box.Text);
             Run(it.Title, () =>
             {
@@ -833,6 +853,9 @@ namespace WispR
                         break;
                     case ResultItem.Kind.Calc:
                         Clipboard.SetText(it.Text);
+                        break;
+                    case ResultItem.Kind.Timer:
+                        if (it.TimerLength > TimeSpan.Zero) Timers.Start(it.Text, it.TimerLength);
                         break;
                     case ResultItem.Kind.Setting:
                         Launcher.Start(it.Page.Target, it.Page.Args, admin ? "runas" : null);
@@ -865,7 +888,7 @@ namespace WispR
         {
             if (index < 0 || index >= list.Items.Count) return;
             var it = (ResultItem)list.Items[index];
-            if (it.Type == ResultItem.Kind.Web || it.Type == ResultItem.Kind.Calc || it.Type == ResultItem.Kind.Setting) return;
+            if (it.Type == ResultItem.Kind.Web || it.Type == ResultItem.Kind.Calc || it.Type == ResultItem.Kind.Setting || it.Type == ResultItem.Kind.Timer) return;
 
             var menu = new ContextMenuStrip
             {
@@ -1197,6 +1220,7 @@ namespace WispR
             if (selected)
             {
                 string hint = it.Type == ResultItem.Kind.Calc ? "Enter to copy"
+                            : it.Type == ResultItem.Kind.Timer ? (it.TimerLength > TimeSpan.Zero ? "Enter to start" : "")
                             : it.Type == ResultItem.Kind.Web || it.Type == ResultItem.Kind.Setting ? "Enter" : "Enter  ·  right-click for more";
                 var hr = new Rectangle(b.Right - (int)(14 * s) - hintW, b.Y, hintW, rowH);
                 TextRenderer.DrawText(g, hint, subFont, hr, T.SubText, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
@@ -1209,12 +1233,13 @@ namespace WispR
             using var path = RoundedRect(r, 7 * s);
             using var fill = new SolidBrush(app ? T.Border : Color.FromArgb(45, T.Accent));
             g.FillPath(fill, path);
-            bool icon = it.Type == ResultItem.Kind.Setting || it.Type == ResultItem.Kind.Calc || it.Type == ResultItem.Kind.Web;
+            bool icon = it.Type == ResultItem.Kind.Setting || it.Type == ResultItem.Kind.Calc || it.Type == ResultItem.Kind.Web || it.Type == ResultItem.Kind.Timer;
             string letter = it.Type switch
             {
                 ResultItem.Kind.Run => ">",
                 ResultItem.Kind.Web => "\uE774",     // globe
                 ResultItem.Kind.Calc => "\uE8EF",    // calculator
+                ResultItem.Kind.Timer => "\uE916",   // stopwatch
                 ResultItem.Kind.Setting => "\uE713", // gear
                 _ => it.Title.Length > 0 ? it.Title.Substring(0, 1).ToUpperInvariant() : "?",
             };

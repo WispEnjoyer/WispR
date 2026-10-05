@@ -914,6 +914,22 @@ namespace WispR
             return null;
         }
 
+        /// <summary>
+        /// Where the timers widget hangs on a screen: the inner right edge (inside the frame), or null over a
+        /// fullscreen game or video. With the bars off it's simply the screen's right edge.
+        /// </summary>
+        public int? RightEdgeFor(Screen scr)
+        {
+            if (!running) return scr.Bounds.Right;
+            foreach (var m in monitors)
+                if (m.Device == scr.DeviceName)
+                {
+                    if (m.FullscreenHidden) return null;
+                    return scr.Bounds.Right - (FrameOn && m.Frame.Visible ? FrameSide : 0);
+                }
+            return scr.Bounds.Right;
+        }
+
         /// <summary>Brings the app that's playing to the front (or starts it).</summary>
         bool ActivateMediaApp(string appId)
         {

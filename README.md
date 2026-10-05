@@ -27,6 +27,7 @@ animated at your monitor's refresh rate.
 - **Top drop-down** — touch the notch at the top edge for
   - 🎵 **Media**: cover, a spinning vinyl coloured from the cover, a seekable waveform
   - 📊 **Performance**: CPU, memory and GPU temperature
+- **Timers** — `set timer 10m` in the launcher; a small widget on the right edge shows them and slides out when you touch it
 - **Wallpapers** — a carousel of your pictures or Wallpaper Engine favourites
 - **Themes** — 8 built-in themes, your own colours, or colours taken from your wallpaper
 
@@ -56,7 +57,7 @@ Settings: right-click the tray icon or an empty spot on the bar → **Settings�
 
 All other Windows shortcuts (<kbd>Win</kbd>+<kbd>E</kbd>, <kbd>Win</kbd>+<kbd>L</kbd>, <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>…) keep working.
 
-**Try typing:** `15*9` · `19% of 250` · `5 km in miles` · `bluetooth` · `dark mode` · `wallpaper`
+**Try typing:** `15*9` · `19% of 250` · `5 km in miles` · `bluetooth` · `dark mode` · `wallpaper` · `set timer "Brot backen" 10m`
 
 ## 📖 Everything in detail
 
@@ -345,6 +346,7 @@ The exe lands in `bin\Release\net48\`.
 | `PerfBoxForm.cs` | The CPU / RAM box with the Task Manager button |
 | `MediaBoxForm.cs`, `MediaService.cs` | The media player box and reading "now playing" from Windows |
 | `WinRtEventSink.cs` | Listens to Windows' media change events (keeps the song length and position up to date) |
+| `Timers.cs`, `TimerWidget.cs` | Timers from the launcher and their widget on the right edge |
 | `Playhead.cs` | WispR's own clock for the song position, so junk reports from apps can't reset it |
 | `VolumePopup.cs` | The volume slider popup |
 | `Calculator.cs` | Maths and unit conversion in the launcher |

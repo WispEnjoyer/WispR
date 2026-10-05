@@ -60,6 +60,7 @@ namespace WispR
         readonly Settings settings;
         readonly Backdrop backdrop;
         readonly BarsController bars;
+        readonly TimerWidget timers;
         readonly System.Windows.Forms.Timer wallpaperWatch = new System.Windows.Forms.Timer { Interval = 5000 };
         SettingsForm settingsForm;
         bool launcherVisibleBeforeTap;
@@ -83,6 +84,7 @@ namespace WispR
             form.TaskbarAt = p => bars.Running ? bars.BottomTaskbarAt(p) : null;
             form.FrameEdgeAt = p => bars.Running ? bars.FrameEdgeAt(p) : null;
             form.ToggleTaskbarPin = e => { if (bars.Running) bars.Taskbar.TogglePin(e); };
+            timers = new TimerWidget(settings) { RightEdgeFor = scr => bars.RightEdgeFor(scr) };
 
             index.Changed += listChanged =>
             {
@@ -182,6 +184,7 @@ namespace WispR
         }
         public void EmergencyRestore()
         {
+            try { timers?.Dispose(); } catch { }
             try { bars.Dispose(); } catch { }
         }
 
