@@ -16,7 +16,7 @@ namespace WispR
         sealed class Tween
         {
             public object Key;
-            public DateTime Start;
+            public long Start;
             public double Ms;
             public Func<double, double> Ease;
             public Action<double> Step;
@@ -37,7 +37,17 @@ namespace WispR
         static readonly AutoResetEvent wake = new AutoResetEvent(false);
         static volatile bool running;
         static int queued;
-        static DateTime lastFrame = DateTime.MinValue;
+        static long lastFrame;
+
+        // a monotonic clock: setting the PC's clock back must not freeze animations
+        static long Now() => System.Diagnostics.Stopwatch.GetTimestamp();
+        static double Ms(long ticks) => ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+        /// <summary>
+        /// The "Animations" setting: how long animations take compared with normal (0 = off: they finish
+        /// at once; 0.65 = fast; 1.4 = relaxed).
+        /// </summary>
+        public static double Speed = 1;
 
         /// <summary>How long the current frame is compared with a 60 Hz one (for per-frame steps).</summary>
         public static float Dt { get; private set; } = 1f;
@@ -58,7 +68,7 @@ namespace WispR
                 pump = new Thread(PumpLoop) { IsBackground = true, Name = "WispR frame clock", Priority = ThreadPriority.AboveNormal };
                 pump.Start();
             }
-            if (!running) { running = true; lastFrame = DateTime.MinValue; wake.Set(); }
+            if (!running) { running = true; lastFrame = 0; wake.Set(); }
         }
 
         static bool dwmOk = true;
@@ -85,14 +95,14 @@ namespace WispR
         static void Frame()
         {
             Interlocked.Exchange(ref queued, 0);
-            var now = DateTime.Now;
-            Dt = lastFrame == DateTime.MinValue ? 1f : (float)Math.Max(0.2, Math.Min(3.0, (now - lastFrame).TotalMilliseconds / 16.667));
+            long now = Now();
+            Dt = lastFrame == 0 ? 1f : (float)Math.Max(0.2, Math.Min(3.0, Ms(now - lastFrame) / 16.667));
             lastFrame = now;
 
             foreach (var t in tweens.ToArray())
             {
                 if (!tweens.Contains(t)) continue; // replaced by an earlier step this frame
-                double p = Math.Min(1, (now - t.Start).TotalMilliseconds / t.Ms);
+                double p = Math.Min(1, Ms(now - t.Start) / t.Ms);
                 try { t.Step(t.Ease(p)); }
                 catch (Exception ex) { Log.Error("Anim", ex); p = 1; }
                 if (p >= 1 && tweens.Remove(t))
@@ -120,7 +130,7 @@ namespace WispR
         public static void Run(object key, double ms, Action<double> step, Action done = null, Func<double, double> ease = null)
         {
             tweens.RemoveAll(t => Equals(t.Key, key));
-            var tw = new Tween { Key = key, Start = DateTime.Now, Ms = Math.Max(1, ms), Ease = ease ?? OutCubic, Step = step, Done = done };
+            var tw = new Tween { Key = key, Start = Now(), Ms = Math.Max(1, ms * Speed), Ease = ease ?? OutCubic, Step = step, Done = done };
             tweens.Add(tw);
             try { step(0); } catch { }
             EnsureRunning();

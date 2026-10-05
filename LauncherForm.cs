@@ -34,6 +34,7 @@ namespace WispR
         readonly float s;
         readonly int rowH;
         readonly Font boxFont, titleFont, subFont, glyphFont, menuFont;
+        Font boldMenuFont;
         Font iconFont;
 
         Rectangle pill;          // the rounded search field
@@ -43,7 +44,7 @@ namespace WispR
         readonly LauncherShell shell = new LauncherShell();
         bool createdAttached;    // the window was created for the attached look (no drop shadow)
         int slide;               // slide-in offset (px below the final position) while opening
-        DateTime slideStart;
+        readonly System.Diagnostics.Stopwatch slideClock = new System.Diagnostics.Stopwatch();
         int slideFrom;
 
         /// <summary>"Bottom": attached to the bottom edge of the screen, growing out of it.</summary>
@@ -732,7 +733,7 @@ namespace WispR
         {
             slideFrom = Math.Max(Height, (int)(60 * s)) + FrameInset;
             slide = slideFrom;
-            slideStart = DateTime.Now;
+            slideClock.Restart();
             Top = anchorY - Height + slide;
             ClipWhileSliding();
             Anim.Frames(SlideKey, SlideTick);
@@ -743,7 +744,7 @@ namespace WispR
         bool SlideTick()
         {
             if (!Visible || closing) return false;
-            double p = Math.Min(1, (DateTime.Now - slideStart).TotalMilliseconds / 200.0);
+            double p = Anim.Speed <= 0.01 ? 1 : Math.Min(1, slideClock.Elapsed.TotalMilliseconds / (200.0 * Anim.Speed));
             slide = (int)Math.Round((1 - Anim.OutQuint(p)) * slideFrom);
             if (p >= 1) slide = 0;
             int top = anchorY - Height + slide;
@@ -901,7 +902,7 @@ namespace WispR
             ToolStripMenuItem Add(string text, Action onClick, bool enabled = true, bool bold = false)
             {
                 var mi = new ToolStripMenuItem(text) { Enabled = enabled, Padding = new Padding(0, (int)(3 * s), 0, (int)(3 * s)) };
-                if (bold) mi.Font = new Font(menuFont, FontStyle.Bold);
+                if (bold) mi.Font = boldMenuFont ??= new Font(menuFont, FontStyle.Bold); // one font for all menus (was a new one per right-click)
                 if (onClick != null) mi.Click += (o, e) => onClick();
                 menu.Items.Add(mi);
                 return mi;

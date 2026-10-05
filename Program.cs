@@ -8,6 +8,9 @@ namespace WispR
 {
     static class Program
     {
+        static bool errorBoxOpen;
+        static DateTime lastErrorBox = DateTime.MinValue;
+
         [STAThread]
         static void Main(string[] args)
         {
@@ -38,8 +41,16 @@ namespace WispR
             Application.ThreadException += (s, e) =>
             {
                 Log.Error("ui", e.Exception);
-                MessageBox.Show("WispR hit an error and kept running:\n" + e.Exception.Message +
-                    "\n\nDetails were written to %APPDATA%\\WispR\\log.txt", "WispR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // One message at a time, and not again for a few minutes: a fault that repeats (a timer
+                // tick) must not stack up dialogs. Everything still goes to the log.
+                if (errorBoxOpen || DateTime.Now - lastErrorBox < TimeSpan.FromMinutes(3)) return;
+                errorBoxOpen = true;
+                try
+                {
+                    MessageBox.Show("WispR hit an error and kept running:\n" + e.Exception.Message +
+                        "\n\nDetails were written to %APPDATA%\\WispR\\log.txt", "WispR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                finally { errorBoxOpen = false; lastErrorBox = DateTime.Now; }
             };
             Log.Write("WispR started (" + Environment.OSVersion + ", " + System.Windows.Forms.Screen.AllScreens.Length + " screen(s))");
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
@@ -184,8 +195,9 @@ namespace WispR
         }
         public void EmergencyRestore()
         {
-            try { timers?.Dispose(); } catch { }
+            try { bars.PrepareForSessionEnd(); } catch { } // the Windows taskbar comes back first, whatever happens next
             try { bars.Dispose(); } catch { }
+            try { timers?.Dispose(); } catch { }
         }
 
         void ApplyAll(string reason)

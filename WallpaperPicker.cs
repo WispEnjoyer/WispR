@@ -310,19 +310,13 @@ namespace WispR
             {
                 if (new FileInfo(path).Length < 2 * 1024 * 1024) // previews are small: read the file itself
                 {
-                    using var fs0 = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                    using var img0 = Image.FromStream(fs0, false, false);
-                    src = new Bitmap(img0);
+                    src = ImageLoad.FromFile(path, 960);
                 }
             }
             catch { src = null; }
             src ??= IconLoader.LoadThumbnail(path, 480);
-            if (src == null)
-            {
-                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                using var img = Image.FromStream(fs, false, false);
-                src = new Bitmap(img);
-            }
+            src ??= ImageLoad.FromFile(path, 960);
+            if (src == null) return null;
             using (src)
             {
                 var dst = new Bitmap(ThumbW, ThumbH, PixelFormat.Format32bppPArgb);
@@ -620,7 +614,8 @@ namespace WispR
             {
                 if (new FileInfo(want.Path).Length > 30 * 1024 * 1024) return; // huge previews stay still
                 gif = Image.FromFile(want.Path);
-                if (!ImageAnimator.CanAnimate(gif)) { gif.Dispose(); gif = null; return; }
+                // animated previews play at their own size: refuse oversized ones (each frame is decoded in full)
+                if (!ImageAnimator.CanAnimate(gif) || (long)gif.Width * gif.Height > 4_000_000) { gif.Dispose(); gif = null; return; }
                 gifFrame ??= (o, e) =>
                 {
                     try { host.BeginInvoke((Action)(() => { if (gif != null && gifRect.Width > 0) host.Invalidate(Rectangle.Inflate(Rectangle.Round(gifRect), 2, 2)); })); } catch { }

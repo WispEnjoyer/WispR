@@ -157,7 +157,14 @@ namespace WispR
         void Watch()
         {
             var c = Cursor.Position;
-            if (!open && (DateTime.Now - lastSample).TotalSeconds >= 1) Sample();
+            if (!open && (DateTime.Now - lastSample).TotalSeconds >= 2) Sample(); // keeps the graphs filled (cheap)
+            // far from the top edge nothing can happen soon: look less often (40 ms only when it matters)
+            if (!open)
+            {
+                int want = c.Y - Screen.FromPoint(c).Bounds.Top > (int)(220 * s) ? 150 : 40;
+                if (watch.Interval != want) watch.Interval = want;
+            }
+            else if (watch.Interval != 40) watch.Interval = 40;
             try { UpdateNotches(c); } catch (Exception ex) { Log.Throttled("notch", "Notch: " + ex.Message); }
             bool buttonsDown = (GetAsyncKeyState(0x01) & 0x8000) != 0 || (GetAsyncKeyState(0x02) & 0x8000) != 0;
             if (!open)

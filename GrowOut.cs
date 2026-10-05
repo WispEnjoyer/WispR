@@ -186,8 +186,8 @@ namespace WispR
                 st.Closing = false;
                 if (f.IsDisposed) return;
                 st.Shell?.Hide();
-                FinishProxy(f, st);
-                finish();
+                finish();              // hidden first…
+                FinishProxy(f, st);    // …then its opacity goes back (no one-frame flash)
             }, e => e * e);
         }
 
@@ -216,7 +216,7 @@ namespace WispR
         public static void Hide(Form f)
         {
             Anim.Stop(Key(f));
-            if (states.TryGetValue(f, out var ps) && ps.Proxying && !ps.Closing) FinishProxy(f, ps);
+            if (states.TryGetValue(f, out var ps) && ps.Proxying) { ps.Closing = false; FinishProxy(f, ps); }
             if (states.TryGetValue(f, out var st) && st.Shell != null && !st.Shell.IsDisposed && st.Shell.Visible) st.Shell.Hide();
             if (!f.IsDisposed && f.Region != null) { var old = f.Region; f.Region = null; old.Dispose(); }
         }

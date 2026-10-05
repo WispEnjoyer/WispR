@@ -58,7 +58,7 @@ namespace WispR
             Timers.Changed += () => { if (!IsDisposed) BeginInvoke((Action)Refresh); };
             Timers.Rang += t => { if (!IsDisposed) BeginInvoke((Action)Ring); };
             watch.Tick += (o, e) => Watch();
-            tick.Tick += (o, e) => { Timers.Check(); Redraw(); StopChimeIfQuiet(); };
+            tick.Tick += (o, e) => { Timers.Check(); RedrawIfChanged(); StopChimeIfQuiet(); };
             Refresh();
         }
 
@@ -125,13 +125,14 @@ namespace WispR
 
         void Ring()
         {
-            ringingSince = DateTime.Now;
+            ringingSince = ringStarted = DateTime.Now;
             SetOpen(true);
             PlayChime();
             // the glow pulses at ~30 frames a second (plenty for a slow pulse)
             if (!Anim.FramesRunning(PulseKey)) Anim.Frames(PulseKey, () =>
             {
-                if (IsDisposed || !Timers.AnyRinging) { Redraw(); return false; }
+                // stops after a minute (then it simply stays lit) so a forgotten timer costs nothing
+                if (IsDisposed || !Timers.AnyRinging || (DateTime.Now - ringStarted).TotalSeconds > 60) { Redraw(); return false; }
                 if ((DateTime.Now - lastPulse).TotalMilliseconds < 33) return true;
                 lastPulse = DateTime.Now;
                 Redraw();
@@ -140,6 +141,7 @@ namespace WispR
         }
 
         const string PulseKey = "timer-pulse";
+        DateTime ringStarted;
         DateTime lastPulse;
 
         // A soft three-note bell ("ding ding ding"), made here — no file needed. Played once.
@@ -217,6 +219,19 @@ namespace WispR
 
         // ---------- drawing ----------
 
+        string drawnState;
+
+        /// <summary>The clock tick: redraws only when what's shown changed (the time text moves once a second).</summary>
+        void RedrawIfChanged()
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var t in Timers.Items) sb.Append(Timers.Clock2(t.Left)).Append(t.Paused).Append(t.Done).Append('|');
+            string state = sb.ToString();
+            if (state == drawnState && Visible) return;
+            drawnState = state;
+            Redraw();
+        }
+
         void Redraw()
         {
             if (Timers.Items.Count == 0) return;
@@ -252,7 +267,8 @@ namespace WispR
                 using var shape = LauncherShell.Shape(h, w, fl, Radius);
                 using (var turn = new Matrix(0, 1, 1, 0, 0, 0)) shape.Transform(turn);
                 bool ringing = Timers.AnyRinging;
-                float pulse = ringing ? (float)(0.5 + 0.5 * Math.Sin(DateTime.Now.TimeOfDay.TotalSeconds * 5)) : 0;
+                bool pulsing = ringing && (DateTime.Now - ringStarted).TotalSeconds <= 60;
+                float pulse = !ringing ? 0 : pulsing ? (float)(0.5 + 0.5 * Math.Sin(DateTime.Now.TimeOfDay.TotalSeconds * 5)) : 1;
                 using (var b = new SolidBrush(ringing ? Ui.Mix(T.Background, T.Accent, 0.10f + 0.12f * pulse) : T.Background)) g.FillPath(b, shape);
                 using (var pen = new Pen(ringing ? Color.FromArgb((int)(120 + 120 * pulse), T.Accent) : Color.FromArgb(90, T.Border), ringing ? 1.6f * s : 1f)) g.DrawPath(pen, shape);
                 g.SetClip(shape);

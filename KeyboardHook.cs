@@ -46,6 +46,17 @@ namespace WispR
 
         IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
+            // an exception escaping a hook callback would end the whole app: never let one out
+            try { return HookCore(nCode, wParam, lParam); }
+            catch (Exception ex)
+            {
+                try { Log.Throttled("keyhook", "Keyboard hook error: " + ex.Message); } catch { }
+                return CallNextHookEx(hookId, nCode, wParam, lParam);
+            }
+        }
+
+        IntPtr HookCore(int nCode, IntPtr wParam, IntPtr lParam)
+        {
             if (nCode >= 0)
             {
                 var k = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);

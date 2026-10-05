@@ -71,12 +71,14 @@ namespace WispR
                 foreach (var line in File.ReadAllLines(file, Encoding.UTF8))
                 {
                     var p = line.Split('\t');
-                    if (p.Length == 4 && p[0] == "U")
-                        apps[p[1]] = new Stat { Count = int.Parse(p[2]), LastTicks = long.Parse(p[3]) };
-                    else if (p.Length == 4 && p[0] == "Q")
+                    // a damaged line is skipped (a bad date here used to fail every keystroke in the launcher)
+                    if (p.Length == 4 && p[0] == "U" && int.TryParse(p[2], out int count) && long.TryParse(p[3], out long ticks)
+                        && count >= 0 && ticks >= 0 && ticks <= DateTime.MaxValue.Ticks)
+                        apps[p[1]] = new Stat { Count = count, LastTicks = ticks };
+                    else if (p.Length == 4 && p[0] == "Q" && int.TryParse(p[3], out int n) && n >= 0)
                     {
                         if (!picks.TryGetValue(p[1], out var map)) picks[p[1]] = map = new Dictionary<string, int>();
-                        map[p[2]] = int.Parse(p[3]);
+                        map[p[2]] = n;
                     }
                 }
             }

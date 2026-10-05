@@ -130,15 +130,18 @@ namespace WispR
             thread.Start();
         }
 
-        public void PlayPause() => commands.Enqueue(s => Fire(CallPtr(s, SlotTogglePlayPause)));
-        public void Next() => commands.Enqueue(s => Fire(CallPtr(s, SlotSkipNext)));
-        public void Previous() => commands.Enqueue(s => Fire(CallPtr(s, SlotSkipPrevious)));
+        readonly AutoResetEvent commandSignal = new AutoResetEvent(false);
+        void Enqueue(Action<IntPtr> command) { commands.Enqueue(command); commandSignal.Set(); }
+
+        public void PlayPause() => Enqueue(s => Fire(CallPtr(s, SlotTogglePlayPause)));
+        public void Next() => Enqueue(s => Fire(CallPtr(s, SlotSkipNext)));
+        public void Previous() => Enqueue(s => Fire(CallPtr(s, SlotSkipPrevious)));
 
         /// <summary>Jump to a position (measured from the start of the track).</summary>
         public void Seek(TimeSpan position)
         {
             long target = startTicks + Math.Max(0, position.Ticks);
-            commands.Enqueue(s =>
+            Enqueue(s =>
             {
                 playhead.Seek(Math.Max(0, position.Ticks), DateTime.UtcNow);
                 if (Slot<FnLongPtr>(s, SlotChangePosition)(s, target, out IntPtr op) == 0) Fire(op);
@@ -152,7 +155,12 @@ namespace WispR
                   SlotSkipNext = 16, SlotSkipPrevious = 17, SlotTogglePlayPause = 20, SlotChangePosition = 24;
 
         /// <summary>Set while the media box is turned off: nothing is read until it's back on.</summary>
-        public volatile bool Paused;
+        public bool Paused
+        {
+            get => paused;
+            set { paused = value; if (!value) commandSignal.Set(); } // reading again: wake up now, not in a second
+        }
+        volatile bool paused;
 
         void Loop()
         {
@@ -160,7 +168,7 @@ namespace WispR
             int failures = 0;
             while (!stop)
             {
-                if (Paused && commands.IsEmpty) { Thread.Sleep(500); continue; } // media box turned off
+                if (Paused && commands.IsEmpty) { commandSignal.WaitOne(1000); continue; } // nothing shows media right now
                 MediaInfo info = null;
                 try
                 {
@@ -173,17 +181,16 @@ namespace WispR
                     UnsubscribeAll();
                     Release(ref manager); // start over next time
                 }
+                // nothing playing: forget the cached cover — the UI disposes its copy, and handing that same
+                // (disposed) picture out again if the song comes back made every redraw fail
+                if (info == null) { lastThumbKey = null; lastThumb = null; }
                 try { Updated?.Invoke(info); } catch { }
 
                 // Commands are handled quickly, and a change event from the player (new length, seek, play/pause)
                 // wakes us straight away; otherwise check once a second (slower if it keeps failing).
                 int wait = failures > 3 ? 10000 : 1000;
                 Thread.Sleep(120); // at most ~8 reads a second, however chatty the player's events are
-                for (int t = 120; t < wait && !stop; t += 50)
-                {
-                    if (!commands.IsEmpty) break;
-                    if (changed.WaitOne(50)) break;
-                }
+                if (commands.IsEmpty && !stop) WaitHandle.WaitAny(new WaitHandle[] { changed, commandSignal }, wait - 120); // sleeps until something happens
             }
             UnsubscribeAll();
             Release(ref manager);
@@ -412,8 +419,7 @@ namespace WispR
                     finally { Marshal.FreeHGlobal(readPtr); }
                     if (ms.Length == 0) return null;
                     ms.Position = 0;
-                    using var img = Image.FromStream(ms);
-                    return new Bitmap(img);
+                    return ImageLoad.FromStream(ms, 640);
                 }
                 finally { Marshal.ReleaseComObject(com); }
             }
@@ -486,7 +492,8 @@ namespace WispR
             try
             {
                 IntPtr raw = WindowsGetStringRawBuffer(h, out uint len);
-                return raw == IntPtr.Zero ? "" : Marshal.PtrToStringUni(raw, (int)len);
+                // other apps decide these strings: keep them to a sane length
+                return raw == IntPtr.Zero ? "" : Marshal.PtrToStringUni(raw, (int)Math.Min(len, 512u));
             }
             finally { WindowsDeleteString(h); }
         }

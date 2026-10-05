@@ -50,9 +50,7 @@ namespace WispR
                 if (sig != null)
                     try
                     {
-                        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                        using var img = Image.FromStream(fs);
-                        loaded = new Bitmap(img);
+                        loaded = ImageLoad.FromFile(path, ImageLoad.ScreenSide());
                     }
                     catch { loaded = null; }
 

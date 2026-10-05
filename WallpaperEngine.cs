@@ -60,7 +60,8 @@ namespace WispR
             {
                 lock (gate)
                 {
-                    if ((DateTime.Now - runningCheckedAt).TotalSeconds < 5) return running;
+                    // not running: listing processes is the costly part, so only look again every 30 s
+                    if ((DateTime.Now - runningCheckedAt).TotalSeconds < (running ? 5 : 30)) return running;
                     runningCheckedAt = DateTime.Now;
                     // the process we found last time still there? (cheap — no process list needed)
                     if (runningPid != 0 && IsEngineExe(Native.GetProcessPath(runningPid))) return running = true;

@@ -771,9 +771,7 @@ namespace WispR
             if (path == null) return null;
             try
             {
-                using var fs = new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite);
-                using var img = Image.FromStream(fs);
-                cached = new Bitmap(img);
+                cached = ImageLoad.FromFile(path, 256);
             }
             catch { cached = null; }
             return cached;

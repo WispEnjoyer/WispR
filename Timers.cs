@@ -38,7 +38,9 @@ namespace WispR
 
         public static TimerItem Start(string title, TimeSpan length)
         {
-            var t = new TimerItem { Title = (title ?? "").Trim(), Length = length, EndUtc = DateTime.UtcNow + length };
+            string tt = (title ?? "").Trim();
+            if (tt.Length > 80) tt = tt.Substring(0, 80);
+            var t = new TimerItem { Title = tt, Length = length, EndUtc = DateTime.UtcNow + length };
             Items.Add(t);
             Log.Write("Timer started: " + t.DisplayTitle + ", " + Describe(length) + ".");
             Save(); Changed?.Invoke();
@@ -113,23 +115,26 @@ namespace WispR
             var c = Clock.Match(rest);
             if (c.Success)
             {
-                int a = int.Parse(c.Groups[1].Value), b = int.Parse(c.Groups[2].Value);
+                int a = int.Parse(c.Groups[1].Value), b = int.Parse(c.Groups[2].Value); // at most 2 digits each: no overflow
                 length = c.Groups[3].Success ? new TimeSpan(a, b, int.Parse(c.Groups[3].Value)) : new TimeSpan(0, a, b); // h:mm:ss or m:ss
                 rest = rest.Remove(c.Index, c.Length);
             }
             else
             {
                 var used = new List<(int, int)>();
+                double seconds = 0; // added up as a number first: a huge "timer 99999999999h" must not overflow
                 foreach (Match p in Part.Matches(rest))
                 {
                     if (!double.TryParse(p.Groups[1].Value.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out double v)) continue;
                     string unit = p.Groups[2].Value.ToLowerInvariant();
-                    if (unit.StartsWith("h") || unit.StartsWith("std") || unit.StartsWith("stunde")) length += TimeSpan.FromHours(v);
-                    else if (unit.StartsWith("s")) length += TimeSpan.FromSeconds(v);
-                    else length += TimeSpan.FromMinutes(v); // "m", "min…" or a bare number
+                    if (unit.StartsWith("h") || unit.StartsWith("std") || unit.StartsWith("stunde")) seconds += v * 3600;
+                    else if (unit.StartsWith("s")) seconds += v;
+                    else seconds += v * 60; // "m", "min…" or a bare number
+                    if (seconds > 86400) seconds = 86400;
                     used.Add((p.Index, p.Length));
                 }
                 for (int i = used.Count - 1; i >= 0; i--) rest = rest.Remove(used[i].Item1, used[i].Item2);
+                length = TimeSpan.FromSeconds(Math.Min(seconds, 86400));
             }
             // whatever words are left (without quotes) make the title: "timer 10m pizza"
             if (title.Length == 0)
@@ -185,20 +190,27 @@ namespace WispR
                 foreach (var line in File.ReadAllLines(FilePath))
                 {
                     var f = line.Split('|');
-                    if (f.Length < 7) continue;
+                    if (f.Length < 7 || Items.Count >= 50) continue;
+                    try
+                    {
+                    if (!long.TryParse(f[2], out long len) || !long.TryParse(f[3], out long end) || !long.TryParse(f[5], out long left)) continue;
+                    if (len < 0 || len > TimeSpan.TicksPerDay || left < 0 || left > TimeSpan.TicksPerDay || end <= 0 || end > DateTime.MaxValue.Ticks) continue;
                     var t = new TimerItem
                     {
                         Id = f[0],
                         Title = Encoding.UTF8.GetString(Convert.FromBase64String(f[1])),
-                        Length = new TimeSpan(long.Parse(f[2])),
-                        EndUtc = new DateTime(long.Parse(f[3]), DateTimeKind.Utc),
+                        Length = new TimeSpan(len),
+                        EndUtc = new DateTime(end, DateTimeKind.Utc),
                         Paused = f[4] == "1",
-                        LeftWhenPaused = new TimeSpan(long.Parse(f[5])),
+                        LeftWhenPaused = new TimeSpan(left),
                         Done = f[6] == "1",
                     };
                     // one that ran out long ago while WispR wasn't running: drop it quietly
                     if (!t.Paused && DateTime.UtcNow - t.EndUtc > TimeSpan.FromHours(6)) continue;
+                    if (t.Title.Length > 80) t.Title = t.Title.Substring(0, 80);
                     Items.Add(t);
+                    }
+                    catch { } // one damaged line costs only that timer
                 }
             }
             catch (Exception ex) { Log.Error("Timers.Load", ex); }

@@ -934,6 +934,8 @@ namespace WispR
         bool ActivateMediaApp(string appId)
         {
             if (string.IsNullOrEmpty(appId)) return false;
+            // the playing app chooses this id: never let it point at a path or a URL
+            if (appId.Length > 200 || appId.IndexOfAny(new[] { '\\', '/', ':', '"', '<', '>', '|', '?', '*' }) >= 0 || appId.Contains("..")) return false;
             string id = appId.ToLowerInvariant(), idExe = id.EndsWith(".exe") ? id : id + ".exe";
             foreach (var w in tracker.Windows)
             {
