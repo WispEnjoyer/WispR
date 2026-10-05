@@ -23,6 +23,10 @@ namespace WispR
             public bool Hooked;
             public byte Alpha = 255;
             public bool Closing;
+            public bool Proxying;          // the outline window is showing the animation picture; the popup itself is invisible
+            public double TargetOpacity = 1;
+            public Rectangle ProxyFrame;   // where the full picture goes when fully out
+            public int ProxyRows;          // how many of its rows show right now
         }
 
         static readonly Dictionary<Form, State> states = new Dictionary<Form, State>();
@@ -63,8 +67,8 @@ namespace WispR
             {
                 st.Hooked = true;
                 f.VisibleChanged += (o, e) => { if (!f.Visible) Hide(f); };
-                f.LocationChanged += (o, e) => { if (f.Visible && !Anim.IsRunning(Key(f))) Render(f); };
-                f.SizeChanged += (o, e) => { if (f.Visible && !Anim.IsRunning(Key(f))) Render(f); };
+                f.LocationChanged += (o, e) => { if (f.Visible && !st.Proxying && !Anim.IsRunning(Key(f))) Render(f); };
+                f.SizeChanged += (o, e) => { if (f.Visible && !st.Proxying && !Anim.IsRunning(Key(f))) Render(f); };
                 f.Disposed += (o, e) => { if (states.TryGetValue(f, out var s2)) { s2.Shell?.Dispose(); s2.Bg?.Dispose(); states.Remove(f); } };
             }
 
@@ -76,25 +80,78 @@ namespace WispR
                 Render(f);
                 return;
             }
-            f.Top = edge;
-            f.Region = new Region(Rectangle.Empty);
+            // The popup goes straight to its place but stays invisible; a picture of it together with its
+            // outline rises out of the edge in the outline window (one window, nothing redrawn per frame),
+            // and the real popup takes over at the end. Started a moment later, so the popup's own layout
+            // (search box, scroll position…) is done before the picture is taken.
+            Anim.Stop(Key(f)); // reopened while sinking back: that animation must not finish (and hide it)
+            if (!st.Proxying) st.TargetOpacity = f.Opacity > 0.02 ? f.Opacity : alpha / 255.0;
+            st.Proxying = true; // first: moving the popup must not redraw the outline
+            f.Opacity = 0;
+            f.Region = null;
+            f.Top = finalTop;
             if (!f.Visible) f.Show();
-            Anim.Run(Key(f), ms, e =>
+            f.BeginInvoke((Action)(() =>
             {
-                if (f.IsDisposed) return;
-                int visible = (int)Math.Round(h * e);
-                f.Top = edge - visible;
-                var old = f.Region;
-                f.Region = new Region(new Rectangle(0, 0, w, visible));
-                old?.Dispose();
-                Render(f);
-            }, () =>
+                if (f.IsDisposed || !f.Visible || !st.Proxying || st.Closing) return;
+                if (!PrepareProxy(f, st)) { FinishProxy(f, st); Render(f); return; }
+                int from = st.ProxyRows, total = st.ProxyFrame.Height;
+                Anim.Run(Key(f), ms, e =>
+                {
+                    if (f.IsDisposed) return;
+                    int rows = (int)Math.Round(Anim.Lerp(from, total, e));
+                    ShowRows(st, rows, e);
+                }, () =>
+                {
+                    if (f.IsDisposed) return;
+                    FinishProxy(f, st);
+                    f.Update();   // the real popup is drawn…
+                    Render(f);    // …before the outline gives up the picture
+                }, Anim.OutQuint);
+            }));
+        }
+
+        /// <summary>Takes the picture of the popup with its outline and loads it into the outline window.</summary>
+        static bool PrepareProxy(Form f, State st)
+        {
+            if (st.Shell == null || st.Shell.IsDisposed || f.Width <= 0 || f.Height <= 0) return false;
+            try
             {
-                if (f.IsDisposed) return;
-                f.Top = finalTop;
-                var old = f.Region; f.Region = null; old?.Dispose();
-                Render(f);
-            }, Anim.OutCubic);
+                int m = Inset(st.Radius), fl = st.Flare;
+                var hole = new Rectangle(f.Left, st.Edge - f.Height, f.Width, f.Height);
+                var frame = new Rectangle(hole.X - m - fl, hole.Y - m, hole.Width + (m + fl) * 2, hole.Height + m);
+                Bitmap bg = null;
+                if (st.Background != null)
+                {
+                    if (st.Bg == null || st.BgRect != frame) { st.Bg?.Dispose(); st.Bg = st.Background(frame); st.BgRect = frame; }
+                    bg = st.Bg;
+                }
+                using var shot = new Bitmap(f.Width, f.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                f.DrawToBitmap(shot, new Rectangle(0, 0, f.Width, f.Height));
+                using var picture = LauncherShell.Build(frame, hole, fl, st.Radius, bg, st.BgRect.Location, st.Theme.Background, st.Theme.Border, shot);
+                st.Shell.BeginProxy(picture);
+                st.ProxyFrame = frame;
+                if (st.ProxyRows <= 0 || st.ProxyRows > frame.Height) st.ProxyRows = 0;
+                return true;
+            }
+            catch (Exception ex) { Log.Error("GrowOut.PrepareProxy", ex); return false; }
+        }
+
+        /// <summary>Shows the top <paramref name="rows"/> rows of the picture, standing on the edge; fades in over the first part.</summary>
+        static void ShowRows(State st, int rows, double fade)
+        {
+            st.ProxyRows = rows;
+            var fr = st.ProxyFrame;
+            byte a = (byte)Math.Round(st.Alpha * Math.Min(1.0, 0.35 + fade * 2.2));
+            st.Shell.ShowProxy(new Point(fr.X, fr.Bottom - Math.Max(1, rows)), rows, a);
+        }
+
+        static void FinishProxy(Form f, State st)
+        {
+            st.Proxying = false;
+            st.ProxyRows = 0;
+            if (!f.IsDisposed && Math.Abs(f.Opacity - st.TargetOpacity) > 0.001) f.Opacity = st.TargetOpacity;
+            st.Shell?.EndProxy();
         }
 
         static object Key(Form f) => ("grow", f);
@@ -103,23 +160,35 @@ namespace WispR
         /// The way out: the popup sinks back into the edge it grew from, then <paramref name="finish"/> runs
         /// (which hides it). Popups that didn't grow out of an edge just finish straight away.
         /// </summary>
-        public static void Close(Form f, Action finish, int ms = 120)
+        public static void Close(Form f, Action finish, int ms = 130)
         {
             if (f.IsDisposed || !f.Visible || !states.TryGetValue(f, out var st) || st.Shell == null || st.Shell.IsDisposed || !st.Shell.Visible)
             { finish(); return; }
-            int w = f.Width, from = Math.Max(0, st.Edge - f.Top);
-            if (from <= 0) { finish(); return; }
             st.Closing = true;
+            if (!st.Proxying)
+            {
+                // take the picture of the popup as it is now, show it in the outline window, then let the
+                // popup itself go invisible: the picture sinks back into the edge
+                st.ProxyRows = 0;
+                if (!PrepareProxy(f, st)) { st.Closing = false; finish(); return; }
+                st.TargetOpacity = f.Opacity > 0.02 ? f.Opacity : st.TargetOpacity;
+                ShowRows(st, st.ProxyFrame.Height, 1);
+                st.Proxying = true;
+                f.Opacity = 0;
+            }
+            int from = st.ProxyRows > 0 ? st.ProxyRows : st.ProxyFrame.Height;
             Anim.Run(Key(f), ms, e =>
             {
                 if (f.IsDisposed) return;
-                int visible = (int)Math.Round(from * (1 - e));
-                f.Top = st.Edge - visible;
-                var old = f.Region;
-                f.Region = new Region(new Rectangle(0, 0, w, visible));
-                old?.Dispose();
-                Render(f);
-            }, () => { st.Closing = false; if (!f.IsDisposed) finish(); }, e => e * e);
+                ShowRows(st, (int)Math.Round(from * (1 - e)), 1 - e * 0.6);
+            }, () =>
+            {
+                st.Closing = false;
+                if (f.IsDisposed) return;
+                st.Shell?.Hide();
+                FinishProxy(f, st);
+                finish();
+            }, e => e * e);
         }
 
         /// <summary>On its way out (clicking its button again should open it again, not close it twice).</summary>
@@ -147,6 +216,7 @@ namespace WispR
         public static void Hide(Form f)
         {
             Anim.Stop(Key(f));
+            if (states.TryGetValue(f, out var ps) && ps.Proxying && !ps.Closing) FinishProxy(f, ps);
             if (states.TryGetValue(f, out var st) && st.Shell != null && !st.Shell.IsDisposed && st.Shell.Visible) st.Shell.Hide();
             if (!f.IsDisposed && f.Region != null) { var old = f.Region; f.Region = null; old.Dispose(); }
         }

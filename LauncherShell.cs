@@ -80,7 +80,21 @@ namespace WispR
                            bool floating = false, Rectangle? dockHole = null, float dockRadius = 0)
         {
             if (screenRect.Width <= 0 || screenRect.Height <= 0) return;
-            using var bmp = new Bitmap(screenRect.Width, screenRect.Height, PixelFormat.Format32bppPArgb);
+            EndProxy();
+            using var bmp = Build(screenRect, hole, flare, radius, background, backgroundAt, fill, border, null, floating, dockHole, dockRadius);
+            Push(bmp, screenRect.Location, alpha);
+            if (!Native.IsWindowVisible(Handle)) Native.ShowWindow(Handle, 4 /* SW_SHOWNOACTIVATE */);
+        }
+
+        /// <summary>
+        /// The outline as a picture. With <paramref name="holeContent"/>, a picture of the popup is put where
+        /// the popup goes (for animating both as one); otherwise that area is left see-through.
+        /// </summary>
+        public static Bitmap Build(Rectangle screenRect, Rectangle hole, int flare, int radius,
+                                   Bitmap background, Point backgroundAt, Color fill, Color border, Bitmap holeContent = null,
+                                   bool floating = false, Rectangle? dockHole = null, float dockRadius = 0)
+        {
+            var bmp = new Bitmap(screenRect.Width, screenRect.Height, PixelFormat.Format32bppPArgb);
             using (var g = Graphics.FromImage(bmp))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -104,6 +118,9 @@ namespace WispR
                 g.SmoothingMode = SmoothingMode.None;
                 using var clear = new SolidBrush(Color.FromArgb(0, 0, 0, 0));
                 g.FillRectangle(clear, hole.X - screenRect.X, hole.Y - screenRect.Y, hole.Width, hole.Height);
+                if (holeContent != null)
+                    g.DrawImage(holeContent, new Rectangle(hole.X - screenRect.X, hole.Y - screenRect.Y, hole.Width, hole.Height),
+                                new Rectangle(0, 0, holeContent.Width, holeContent.Height), GraphicsUnit.Pixel);
                 if (dockHole is Rectangle dh) // under the taskbar: it draws itself there
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -112,8 +129,61 @@ namespace WispR
                     g.FillPath(clear, hp);
                 }
             }
-            Push(bmp, screenRect.Location, alpha);
+            return bmp;
+        }
+
+        // ---------- the proxy: one prepared picture, shown a part at a time (for open/close animations) ----------
+        // Each frame only changes which rows of the picture are shown and where — no drawing at all — so the
+        // popup and its outline move as one, smoothly, even on very fast screens.
+
+        IntPtr proxyDc, proxyBmp, proxyOld;
+        Size proxySize;
+
+        public void BeginProxy(Bitmap picture)
+        {
+            EndProxy();
+            IntPtr screen = GetDC(IntPtr.Zero);
+            try
+            {
+                proxyDc = CreateCompatibleDC(screen);
+                proxyBmp = picture.GetHbitmap(Color.FromArgb(0));
+                proxyOld = SelectObject(proxyDc, proxyBmp);
+                proxySize = picture.Size;
+            }
+            finally { ReleaseDC(IntPtr.Zero, screen); }
+        }
+
+        /// <summary>Shows the top <paramref name="rows"/> rows of the prepared picture with their top-left at <paramref name="at"/>.</summary>
+        public void ShowProxy(Point at, int rows, byte alpha)
+        {
+            if (proxyDc == IntPtr.Zero) return;
+            rows = Math.Max(1, Math.Min(proxySize.Height, rows));
+            IntPtr screen = GetDC(IntPtr.Zero);
+            try
+            {
+                var size = new SIZE { cx = proxySize.Width, cy = rows };
+                var src = new POINT();
+                var dst = new POINT { x = at.X, y = at.Y };
+                var blend = new BLENDFUNCTION { BlendOp = 0, BlendFlags = 0, SourceConstantAlpha = alpha, AlphaFormat = 1 };
+                UpdateLayeredWindow(Handle, screen, ref dst, ref size, proxyDc, ref src, 0, ref blend, 2);
+            }
+            finally { ReleaseDC(IntPtr.Zero, screen); }
             if (!Native.IsWindowVisible(Handle)) Native.ShowWindow(Handle, 4 /* SW_SHOWNOACTIVATE */);
+        }
+
+        public void EndProxy()
+        {
+            if (proxyDc == IntPtr.Zero) return;
+            if (proxyOld != IntPtr.Zero) SelectObject(proxyDc, proxyOld);
+            if (proxyBmp != IntPtr.Zero) DeleteObject(proxyBmp);
+            DeleteDC(proxyDc);
+            proxyDc = proxyBmp = proxyOld = IntPtr.Zero;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            EndProxy();
+            base.Dispose(disposing);
         }
 
         void Push(Bitmap bmp, Point at, byte alpha)
