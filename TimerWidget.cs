@@ -173,7 +173,7 @@ namespace WispR
         }
 
         int Rows => Math.Min(MaxRows, Timers.Items.Count);
-        float Depth => Lerp(58 * s, 300 * s, Ease(open));                                       // how far it reaches into the screen
+        float Depth => Lerp(58 * s, 300 * s + edgeInset, Ease(open));                                       // how far it reaches into the screen
         float Length => Lerp(76 * s, (40 + Rows * 66 + 10) * s, Ease(open));                     // along the edge
         static float Lerp(float a, float b, float t) => a + (b - a) * t;
         static float Ease(float t) => t;
@@ -225,7 +225,8 @@ namespace WispR
                 var seen = new Rectangle(0, fl, w + edgeInset, len);
                 float collapsedAlpha = Math.Max(0, 1 - open * 2.2f), listAlpha = Math.Max(0, (open - 0.45f) / 0.55f);
                 if (collapsedAlpha > 0.01f) DrawCollapsed(g, seen, collapsedAlpha);
-                if (listAlpha > 0.01f) DrawList(g, body, listAlpha);
+                // the list: as far from the left edge as the frame strip makes the right side look, so both margins match
+                if (listAlpha > 0.01f) DrawList(g, new Rectangle(body.X + edgeInset, body.Y, body.Width - edgeInset, body.Height), listAlpha);
             }
             return bmp;
         }
