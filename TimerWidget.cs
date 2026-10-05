@@ -127,13 +127,11 @@ namespace WispR
         {
             ringingSince = DateTime.Now;
             SetOpen(true);
-            try
-            {
-                string wav = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"Media\Alarm01.wav");
-                if (System.IO.File.Exists(wav)) { chime ??= new System.Media.SoundPlayer(wav); chime.PlayLooping(); }
-                else System.Media.SystemSounds.Exclamation.Play();
-            }
-            catch { }
+            chimesLeft = 5;
+            PlayChime();
+            chimeTimer ??= new Timer { Interval = 8000 };
+            chimeTimer.Tick -= ChimeTick; chimeTimer.Tick += ChimeTick;
+            chimeTimer.Start();
             // the glow pulses at ~30 frames a second (plenty for a slow pulse)
             if (!Anim.FramesRunning(PulseKey)) Anim.Frames(PulseKey, () =>
             {
@@ -148,6 +146,53 @@ namespace WispR
         const string PulseKey = "timer-pulse";
         DateTime lastPulse;
 
+        // A soft three-note bell, made here (no file needed): quiet, short, repeated every 8 s, five times at most.
+        int chimesLeft;
+        Timer chimeTimer;
+        void ChimeTick(object o, EventArgs e) { if (--chimesLeft <= 0 || !Timers.AnyRinging) { chimeTimer.Stop(); return; } PlayChime(); }
+
+        void PlayChime()
+        {
+            try
+            {
+                chime ??= new System.Media.SoundPlayer(new System.IO.MemoryStream(Bell()));
+                chime.Play();
+            }
+            catch { try { System.Media.SystemSounds.Asterisk.Play(); } catch { } }
+        }
+
+        static byte[] Bell()
+        {
+            const int rate = 44100;
+            // three gentle notes (E5, G5, C6), each a soft sine with a little shimmer, fading out
+            var notes = new[] { (f: 659.25, at: 0.00), (f: 783.99, at: 0.16), (f: 1046.5, at: 0.32) };
+            int n = (int)(rate * 1.6);
+            var pcm = new short[n];
+            foreach (var note in notes)
+            {
+                int start = (int)(note.at * rate);
+                for (int i = start; i < n; i++)
+                {
+                    double t = (i - start) / (double)rate;
+                    double attack = Math.Min(1, t / 0.012);                 // no click at the start
+                    double env = attack * Math.Exp(-t * 3.2);               // bell-like fade
+                    double v = Math.Sin(2 * Math.PI * note.f * t) * 0.8 + Math.Sin(2 * Math.PI * note.f * 2.01 * t) * 0.12;
+                    int s16 = pcm[i] + (int)(v * env * 0.16 * short.MaxValue); // quiet: ~16 % of full scale per note
+                    pcm[i] = (short)Math.Max(short.MinValue, Math.Min(short.MaxValue, s16));
+                }
+            }
+            using var ms = new System.IO.MemoryStream();
+            using (var w = new System.IO.BinaryWriter(ms, System.Text.Encoding.ASCII, true))
+            {
+                w.Write(System.Text.Encoding.ASCII.GetBytes("RIFF")); w.Write(36 + n * 2); w.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+                w.Write(System.Text.Encoding.ASCII.GetBytes("fmt ")); w.Write(16); w.Write((short)1); w.Write((short)1);
+                w.Write(rate); w.Write(rate * 2); w.Write((short)2); w.Write((short)16);
+                w.Write(System.Text.Encoding.ASCII.GetBytes("data")); w.Write(n * 2);
+                foreach (var v in pcm) w.Write(v);
+            }
+            return ms.ToArray();
+        }
+
         void StopChimeIfQuiet()
         {
             // nothing left ringing, or it has been ringing for a minute: stop the sound (the widget keeps glowing)
@@ -157,6 +202,7 @@ namespace WispR
         void StopChime()
         {
             try { chime?.Stop(); } catch { }
+            chimeTimer?.Stop();
             ringingSince = DateTime.MinValue;
         }
 
@@ -238,8 +284,9 @@ namespace WispR
             var t = Timers.Primary;
             if (t == null) return;
             Color col = t.Done ? T.Accent : t.Paused ? T.SubText : T.Accent;
-            float ring = 30 * s, th = 3.2f * s;
-            var rr = new RectangleF(body.X + (body.Width - ring) / 2f, body.Y + 9 * s, ring, ring);
+            float ring = 30 * s, th = 3.2f * s, gap = 3 * s, textH = 16 * s;
+            float top = body.Y + (body.Height - (ring + gap + textH)) / 2f; // ring and time together, centred
+            var rr = new RectangleF(body.X + (body.Width - ring) / 2f, top, ring, ring);
             using (var pen = new Pen(A(Color.FromArgb(55, col), alpha), th)) g.DrawEllipse(pen, rr);
             float p = t.Done ? 1 : 1 - t.Progress; // the ring empties as time runs out
             if (p > 0.001f)
@@ -248,7 +295,7 @@ namespace WispR
             string mid = t.Done ? "" : t.Paused ? "" : ""; // check / pause / stopwatch
             DrawText(g, mid, glyphFont, Rectangle.Round(rr), A(t.Done ? T.Accent : T.SubText, alpha));
             string time = t.Done ? "Done" : Timers.Clock2(t.Left);
-            DrawText(g, time, tinyTimeFont, new Rectangle(body.X, (int)(rr.Bottom + 3 * s), body.Width, (int)(16 * s)), A(T.Text, alpha));
+            DrawText(g, time, tinyTimeFont, new Rectangle(body.X, (int)(rr.Bottom + gap), body.Width, (int)textH), A(T.Text, alpha));
             if (Timers.Items.Count > 1) // how many are running
             {
                 var badge = new RectangleF(body.X + 6 * s, body.Y + 5 * s, 15 * s, 15 * s);
@@ -292,7 +339,8 @@ namespace WispR
             if (f > 0.001f) using (var p = Ui.Round(new RectangleF(r.X + pad, by, Math.Max(bh, bw * f), bh), bh / 2)) using (var b = new SolidBrush(A(col, alpha))) g.FillPath(b, p);
 
             // buttons on the right
-            int bs = (int)(28 * s), bx = r.Right - pad - bs, byy = r.Y + (int)(10 * s);
+            int bs = (int)(28 * s), bx = r.Right - pad - bs;
+            int byy = r.Y + (int)(27 * s) - bs / 2; // centred on the title + time, above the progress line
             if (t.Done)
             {
                 Button(g, new Rectangle(bx, byy, bs, bs), "", "Dismiss", () => Timers.Dismiss(t), alpha, primary: true);
@@ -378,7 +426,7 @@ namespace WispR
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { watch.Dispose(); tick.Dispose(); StopChime(); chime?.Dispose(); glyphFont?.Dispose(); Anim.StopFrames(PulseKey); }
+            if (disposing) { watch.Dispose(); tick.Dispose(); StopChime(); chime?.Dispose(); chimeTimer?.Dispose(); glyphFont?.Dispose(); Anim.StopFrames(PulseKey); }
             base.Dispose(disposing);
         }
 
