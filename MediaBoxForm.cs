@@ -62,18 +62,6 @@ namespace WispR
             bool had = info != null;
             string oldKey = info?.Key;
             var oldThumb = info?.Thumbnail;
-            // Some apps clear the song length from time to time — YouTube does right after a seek. Keep the
-            // last known length for the same song and keep counting from where we were.
-            if (i != null && info != null && i.Key == info.Key && i.DurationTicks <= 0 && info.DurationTicks > 0)
-            {
-                var pos = info.Position;
-                i.DurationTicks = info.DurationTicks;
-                i.StartTicks = info.StartTicks;
-                i.CanSeek = info.CanSeek;
-                i.PositionTicks = pos.Ticks;
-                i.PositionAtUtc = DateTime.UtcNow;
-                Log.Throttled("media-timeline", "Media: " + (i.AppId ?? "?") + " cleared its song length — keeping the last known one.");
-            }
             // Right after a seek the app may still report the old position for a moment: keep ours.
             if (i != null && DateTime.UtcNow < seekHoldUntil && info != null && i.Key == info.Key)
             {

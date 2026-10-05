@@ -259,12 +259,6 @@ namespace WispR
             }
             else missingSince = DateTime.MinValue;
             var old = info?.Thumbnail;
-            if (i != null && info != null && i.Key == info.Key && i.DurationTicks <= 0 && info.DurationTicks > 0)
-            {   // some apps clear the length now and then (YouTube after a seek): keep the last one
-                var pos = info.Position;
-                i.DurationTicks = info.DurationTicks; i.CanSeek = info.CanSeek;
-                i.PositionTicks = pos.Ticks; i.PositionAtUtc = DateTime.UtcNow;
-            }
             if (i != null && info != null && i.Key == info.Key && DateTime.UtcNow < seekHoldUntil)
             {
                 i.PositionTicks = seekTargetTicks; i.PositionAtUtc = seekAt;
@@ -612,7 +606,11 @@ namespace WispR
                 }
             }
             else
-                DrawText(g, "The player isn't reporting this song's length", smallFont, new Rectangle(r.X, r.Bottom + (int)(4 * s), r.Width, (int)(18 * s)), T.SubText, left: true);
+            {
+                // no length from the app: still show how far in we are (WispR keeps its own clock)
+                DrawText(g, Time(i.Position), smallFont, new Rectangle(r.X, r.Bottom + (int)(4 * s), (int)(80 * s), (int)(18 * s)), T.Text, left: true);
+                DrawText(g, "length not reported by the player", smallFont, new Rectangle(r.Right - (int)(260 * s), r.Bottom + (int)(4 * s), (int)(260 * s), (int)(18 * s)), T.SubText, right: true);
+            }
         }
 
         void DrawButton(Graphics g, Rectangle r, string glyph, bool primary, Action click, Color accent)

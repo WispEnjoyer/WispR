@@ -41,8 +41,7 @@ namespace WispR
         public event Action<MediaInfo> Updated; // raised on the background thread; null = nothing playing
 
         readonly ConcurrentQueue<Action<IntPtr>> commands = new ConcurrentQueue<Action<IntPtr>>();
-        long lastReportedPos = -1; string lastPosKey; DateTime lastReportedAt;
-        volatile int seekGuardUntil; // ignore stale positions for a moment right after we seek
+        readonly Playhead playhead = new Playhead(); // only touched on the media thread
         long startTicks;
         readonly Thread thread;
         volatile bool stop;
@@ -65,9 +64,9 @@ namespace WispR
         public void Seek(TimeSpan position)
         {
             long target = startTicks + Math.Max(0, position.Ticks);
-            seekGuardUntil = Environment.TickCount + 1500;
             commands.Enqueue(s =>
             {
+                playhead.Seek(Math.Max(0, position.Ticks), DateTime.UtcNow);
                 if (Slot<FnLongPtr>(s, SlotChangePosition)(s, target, out IntPtr op) == 0) Fire(op);
             });
         }
@@ -102,8 +101,7 @@ namespace WispR
                 try { Updated?.Invoke(info); } catch { }
 
                 // Commands are handled quickly; otherwise check once a second (slower if it keeps failing).
-                int wait = failures > 3 ? 10000 : pollSoon ? 250 : 1000;
-                pollSoon = false;
+                int wait = failures > 3 ? 10000 : 1000;
                 for (int t = 0; t < wait && !stop; t += 50)
                 {
                     if (!commands.IsEmpty) break;
@@ -168,34 +166,15 @@ namespace WispR
                     var other = TimelineFromOtherSessions(session, info.AppId, info.Title);
                     if (other.Duration > 0) tl = other;
                 }
-                if (tl.Ok)
-                {
-                    info.StartTicks = tl.Start;
-                    info.DurationTicks = tl.Duration;
-                    info.CanSeek = tl.MaxSeek > tl.MinSeek;
-                    startTicks = tl.Start;
-                    long pos = tl.Pos;
-                    var now = DateTime.UtcNow;
+                if (tl.Ok) { info.StartTicks = tl.Start; startTicks = tl.Start; }
 
-                    // When was this position true? Trust the app's own timestamp only if it's recent —
-                    // several apps don't refresh it when you seek, which made the bar jump or fill up.
-                    if (pos != lastReportedPos || info.Key != lastPosKey)
-                    {
-                        DateTime appTime = tl.Updated > 0 ? DateTime.FromFileTimeUtc(tl.Updated) : DateTime.MinValue;
-                        lastReportedAt = appTime <= now && (now - appTime).TotalSeconds < 3 ? appTime : now;
-                        lastReportedPos = pos;
-                        lastPosKey = info.Key;
-                    }
-                    info.PositionTicks = pos;
-                    info.PositionAtUtc = lastReportedAt;
-                    if (unchecked(Environment.TickCount - seekGuardUntil) < 0) info.PositionAtUtc = default; // just sought: let the UI keep its own value
-                }
-
-                // A song's length doesn't change: once an app has told us, keep it even if it later
-                // reports none (YouTube in Firefox-based browsers drops it after seeks and skips).
-                if (info.DurationTicks > 0) { knownLengthKey = info.Key; knownLength = info.DurationTicks; knownCanSeek = info.CanSeek; }
-                else if (info.Key == knownLengthKey && knownLength > 0) { info.DurationTicks = knownLength; info.CanSeek = knownCanSeek; }
-                if (info.DurationTicks <= 0 && info.Playing && info.Title.Length > 0) MaybeNudge(session, info);
+                // Where the song is comes from WispR's own clock, fed by the app's reports (see Playhead):
+                // junk reports ("0 of 0", stale positions) can't throw the progress back to the start.
+                var (pos, at) = playhead.Update(info.Key, info.Playing, tl.Ok, tl.Pos, tl.Updated, tl.Duration, tl.MaxSeek > tl.MinSeek, DateTime.UtcNow);
+                info.PositionTicks = pos;
+                info.PositionAtUtc = at;
+                info.DurationTicks = playhead.Duration;
+                info.CanSeek = playhead.CanSeek || playhead.Duration > 0;
                 if (info.DurationTicks <= 0 && info.Title.Length > 0 && info.Key != loggedMissingKey)
                 {
                     loggedMissingKey = info.Key;
@@ -209,65 +188,8 @@ namespace WispR
         }
 
 
-        string knownLengthKey, loggedMissingKey;
-        long knownLength;
-        bool knownCanSeek;
+        string loggedMissingKey;
         int sessionCount = -1;
-
-        // ---------- the pause/play nudge ----------
-        // Some browsers (YouTube in Floorp/Firefox) sometimes don't report a song's length until playback
-        // changes state. Pausing and playing again straight away makes them report it. Strictly limited:
-        // only while it plays without a length, at most twice per song, and only one reader at a time
-        // (the top panel and the media box each have their own).
-        static readonly object nudgeLock = new object();
-        static string nudgeKey;
-        static int nudgeCount;
-        static DateTime noLengthSince, lastNudge;
-        volatile bool pollSoon;
-
-        void MaybeNudge(IntPtr session, MediaInfo info)
-        {
-            lock (nudgeLock)
-            {
-                var now = DateTime.UtcNow;
-                // a new song without a length: look again in a quarter second, and nudge then if still nothing
-                if (info.Key != nudgeKey) { nudgeKey = info.Key; nudgeCount = 0; noLengthSince = now; pollSoon = true; return; }
-                if (nudgeCount >= 2) return; // still nothing after two tries: probably a live stream
-                double waited = (now - noLengthSince).TotalSeconds;
-                if (waited < (nudgeCount == 0 ? 0.2 : 4) || (now - lastNudge).TotalSeconds < 3) { pollSoon = nudgeCount == 0; return; }
-                nudgeCount++;
-                lastNudge = noLengthSince = now;
-                Log.Throttled("media-nudge:" + info.Key + nudgeCount, "Media: no song length from " + info.AppId + " — paused and resumed once to make it report it (try " + nudgeCount + ").");
-            }
-            try
-            {
-                AwaitDone(CallPtr(session, 11)); // TryPauseAsync — wait only until the app has taken it
-                Fire(CallPtr(session, 10));      // TryPlayAsync, straight away
-                pollSoon = true;                 // read the length again right after
-            }
-            catch { }
-        }
-
-        /// <summary>Waits (briefly) for an async call to finish, then releases it.</summary>
-        static void AwaitDone(IntPtr op)
-        {
-            if (op == IntPtr.Zero) return;
-            try
-            {
-                var iid = IID_IAsyncInfo;
-                if (Marshal.QueryInterface(op, ref iid, out IntPtr ai) != 0) return;
-                try
-                {
-                    for (int i = 0; i < 60; i++) // at most ~0.15 s
-                    {
-                        if (CallInt(ai, 7) != 0) break; // no longer "Started"
-                        Thread.Sleep(2);
-                    }
-                }
-                finally { Marshal.Release(ai); }
-            }
-            finally { Marshal.Release(op); }
-        }
 
         struct Timeline { public bool Ok; public long Start, End, MinSeek, MaxSeek, Pos, Updated; public long Duration; }
 
