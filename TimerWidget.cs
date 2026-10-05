@@ -284,14 +284,14 @@ namespace WispR
                 using (var pen = new Pen(A(col, alpha), th) { StartCap = LineCap.Round, EndCap = LineCap.Round })
                     g.DrawArc(pen, rr, -90, 360 * p);
             string mid = t.Done ? "" : t.Paused ? "" : ""; // check / pause / stopwatch
-            DrawText(g, mid, glyphFont, Rectangle.Round(rr), A(t.Done ? T.Accent : T.SubText, alpha));
+            DrawCentered(g, mid, glyphFont, rr, A(t.Done ? T.Accent : T.SubText, alpha));
             string time = t.Done ? "Done" : Timers.Clock2(t.Left);
             DrawText(g, time, tinyTimeFont, new Rectangle(body.X, (int)(rr.Bottom + gap), body.Width, (int)textH), A(T.Text, alpha));
             if (Timers.Items.Count > 1) // how many are running
             {
                 var badge = new RectangleF(body.X + 6 * s, body.Y + 5 * s, 15 * s, 15 * s);
                 using (var b = new SolidBrush(A(T.Accent, alpha))) g.FillEllipse(b, badge);
-                DrawText(g, Timers.Items.Count.ToString(), smallFont, Rectangle.Round(badge), A(Ui.OnAccent(T.Accent), alpha));
+                DrawCentered(g, Timers.Items.Count.ToString(), smallFont, badge, A(Ui.OnAccent(T.Accent), alpha));
             }
         }
 
@@ -352,8 +352,30 @@ namespace WispR
             if (primary || hot)
                 using (var b = new SolidBrush(A(primary ? T.Accent : Color.FromArgb(60, T.Accent), alpha))) g.FillEllipse(b, r);
             Color fg = primary ? Ui.OnAccent(T.Accent) : hot ? Ui.Mix(T.Accent, T.Text, 0.3f) : T.Text;
-            DrawText(g, glyph, text ? headFont : glyphFont, r, A(fg, alpha));
+            DrawCentered(g, glyph, text ? headFont : glyphFont, r, A(fg, alpha));
             buttons.Insert(0, (r, click)); // buttons win over the row behind them
+        }
+
+        /// <summary>
+        /// Draws a symbol (or a few characters) exactly in the middle of <paramref name="r"/>: centred on the
+        /// shape's own outline, not on the font's line box — icon fonts pad their glyphs unevenly, which put
+        /// them visibly off-centre in their circles.
+        /// </summary>
+        static void DrawCentered(Graphics g, string text, Font font, RectangleF r, Color color)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            using var path = new GraphicsPath();
+            float px = font.SizeInPoints * g.DpiY / 72f;
+            path.AddString(text, font.FontFamily, (int)font.Style, px, PointF.Empty, StringFormat.GenericTypographic);
+            var b = path.GetBounds();
+            if (b.Width <= 0 || b.Height <= 0) return;
+            using (var m = new Matrix())
+            {
+                m.Translate(r.X + (r.Width - b.Width) / 2f - b.X, r.Y + (r.Height - b.Height) / 2f - b.Y);
+                path.Transform(m);
+            }
+            using var brush = new SolidBrush(color);
+            g.FillPath(brush, path);
         }
 
         static void DrawText(Graphics g, string text, Font font, Rectangle r, Color color, bool left = false, bool right = false)
