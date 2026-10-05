@@ -63,6 +63,7 @@ namespace WispR
             AddPage("", "Wallpapers", BuildWallpapers);
             AddPage("", "Taskbar", BuildTaskbar);
             AddPage("", "On the bars", BuildBarItems);
+            AddPage("\uE70D", "Drop-down", BuildDropDown);
             AddPage("", "General", BuildGeneral);
             Select(pages[0]);
 
@@ -154,7 +155,7 @@ namespace WispR
 
         Label Section(Panel page, string text)
         {
-            var l = new Label { Text = text, Font = sectionFont, AutoSize = true, Margin = Padding.Empty };
+            var l = new Label { Text = text, Font = sectionFont, AutoSize = true, Margin = Padding.Empty, UseMnemonic = false };
             stylers.Add(t => l.ForeColor = t.SubText);
             page.Controls.Add(l);
             return l;
@@ -207,11 +208,11 @@ namespace WispR
         Control Row(string title, string desc, Control right)
         {
             var row = new RowPanel { S = s };
-            row.Title = new Label { Text = title, Font = rowFont, AutoSize = true };
+            row.Title = new Label { Text = title, Font = rowFont, AutoSize = true, UseMnemonic = false };
             row.Controls.Add(row.Title);
             if (!string.IsNullOrEmpty(desc))
             {
-                row.Desc = new Label { Text = desc, Font = descFont, AutoSize = true };
+                row.Desc = new Label { Text = desc, Font = descFont, AutoSize = true, UseMnemonic = false };
                 row.Controls.Add(row.Desc);
             }
             if (right != null) { row.Right = right; row.Controls.Add(right); }
@@ -264,7 +265,7 @@ namespace WispR
         }
 
         /// <summary>A slider with its value shown next to it; moves in <paramref name="step"/>s.</summary>
-        Control Slider(int min, int max, int step, Func<int> get, Action<int> set, Func<int, string> format, int width = 220)
+        Control Slider(int min, int max, int step, Func<int> get, Action<int> set, Func<int, string> format, int width = 180)
         {
             int steps = (max - min) / step;
             var slider = new FlatSlider(() => T, s, 0, steps) { Width = S(width) };
@@ -396,6 +397,13 @@ namespace WispR
             AddCard(page,
                 Row("Opacity", "How see-through the launcher and bars are", Slider(60, 100, 1, () => st.Opacity, v => st.Opacity = v, v => v + " %")),
                 Row("Launcher width", null, Slider(480, 1000, 20, () => st.Width, v => st.Width = v, v => v + " px")));
+
+            Section(page, "Shape & motion");
+            AddCard(page,
+                Row("Corner roundness", "The launcher, popups, drop-down, timers and screen frame",
+                    Slider(0, 28, 1, () => st.CornerRadius, v => st.CornerRadius = v, v => v == 0 ? "Square" : v + " px", 180)),
+                Row("Animations", "Off makes everything appear at once (lightest)",
+                    Choice(new[] { "Off", "Fast", "Normal", "Relaxed" }, new[] { "Off", "Fast", "Normal", "Relaxed" }, () => st.Animations, v => st.Animations = v, 160)));
         }
 
         void BuildBackground(Panel page)
@@ -502,15 +510,7 @@ namespace WispR
             Section(page, "Boxes");
             AddCard(page,
                 ToggleRow("Start & power", "Their own box in the bottom-left corner", () => st.ShowStartButton, v => st.ShowStartButton = v),
-                ToggleRow("Task view button", null, () => st.ShowTaskView, v => st.ShowTaskView = v),
-                ToggleRow("Top drop-down", "Media and performance slide down when the mouse touches the top edge (instead of boxes on the bar)",
-                    () => st.TopPanel, v => st.TopPanel = v),
-                ToggleRow("Notch at the top edge", "A small tab that shows where the drop-down is and lights up as you get close",
-                    () => st.ShowNotch, v => st.ShowNotch = v),
-                Row("Record speed", "How fast the vinyl in the Media tab spins (0 = it stays still)",
-                    Slider(0, 45, 1, () => st.VinylRpm, v => st.VinylRpm = v, v => v == 0 ? "Still" : v + " rpm", 180)),
-                ToggleRow("CPU / RAM box", "In the left corner", () => st.ShowPerfBox, v => st.ShowPerfBox = v),
-                ToggleRow("Media player box", "While something plays", () => st.ShowMediaBox, v => st.ShowMediaBox = v));
+                ToggleRow("Task view button", null, () => st.ShowTaskView, v => st.ShowTaskView = v));
 
             Section(page, "System box");
             AddCard(page,
@@ -532,6 +532,29 @@ namespace WispR
                 ToggleRow("Seconds", null, () => st.ShowSeconds, v => st.ShowSeconds = v));
         }
 
+        void BuildDropDown(Panel page)
+        {
+            Section(page, "Top drop-down");
+            AddCard(page,
+                ToggleRow("Top drop-down", "Media and performance slide down when the mouse rests at the top edge of the screen",
+                    () => st.TopPanel, v => st.TopPanel = v),
+                ToggleRow("Notch at the top edge", "A small tab that shows where the drop-down is and lights up as you get close",
+                    () => st.ShowNotch, v => st.ShowNotch = v),
+                Row("Opens after", "How long the mouse rests at the edge first (longer = fewer accidental openings)",
+                    Slider(0, 600, 10, () => st.TopPanelDelay, v => st.TopPanelDelay = v, v => v == 0 ? "At once" : v + " ms", 180)),
+                Row("Opens on", null, Choice(new[] { "Auto", "Media", "Performance", "Last" },
+                    new[] { "Media while something plays", "Media", "Performance", "Where I left it" }, () => st.TopPanelTab, v => st.TopPanelTab = v, 220)));
+
+            Section(page, "Media");
+            var looks = new[] { "Random" }.Concat(Enum.GetNames(typeof(Vinyl.Style))).ToArray();
+            var lookLabels = new[] { "A different one per song" }.Concat(Enum.GetNames(typeof(Vinyl.Style))).ToArray();
+            AddCard(page,
+                Row("Record speed", "How fast the vinyl spins (0 = it stays still)",
+                    Slider(0, 45, 1, () => st.VinylRpm, v => st.VinylRpm = v, v => v == 0 ? "Still" : v + " rpm", 180)),
+                Row("Record look", "The pressing the vinyl gets, coloured from the cover",
+                    Choice(looks, lookLabels, () => st.VinylStyle, v => st.VinylStyle = v, 220)));
+        }
+
         void BuildGeneral(Panel page)
         {
             Section(page, "Windows key");
@@ -549,7 +572,12 @@ namespace WispR
                 Row("Position", null, Choice(new[] { "Bottom", "Center", "Top" },
                     new[] { "Attached to the bottom", "Middle of the screen", "Top of the screen" },
                     () => st.LauncherPosition, v => st.LauncherPosition = v, 200)),
-                Row("Web search", "Used for \"Search the web\" results", engine));
+                Row("Web search", "Used for \"Search the web\" results", engine),
+                Row("Results shown", null, Slider(4, 12, 1, () => st.LauncherRows, v => st.LauncherRows = v, v => v + " rows", 180)));
+
+            Section(page, "Timers");
+            AddCard(page,
+                ToggleRow("Sound when a timer ends", "Type \"set timer 10m\" in the launcher to start one", () => st.TimerSound, v => st.TimerSound = v));
 
             Section(page, "Start menu");
             var nameBox = new TextBox { Width = S(180), BorderStyle = BorderStyle.FixedSingle, Font = rowFont };

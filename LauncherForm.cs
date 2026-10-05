@@ -24,7 +24,7 @@ namespace WispR
     /// <summary>The popup: a search box with a list of results underneath.</summary>
     sealed class LauncherForm : Form
     {
-        const int MaxRows = 8;
+        int MaxRows => settings.LauncherRows;
 
         readonly AppIndex index;
         readonly Usage usage;
@@ -59,8 +59,8 @@ namespace WispR
         int dockScreenBottom;    // bottom edge of that screen
         bool Docked => Attached && dockBar != IntPtr.Zero && !dock.IsEmpty;
         int DockGap => FrameInset + (int)(4 * s); // space between the results and the taskbar row
-        int TopRadius => (int)(18 * s);
-        int Flare => (int)(18 * s);
+        int TopRadius => Ui.CornerPx(s);
+        int Flare => Ui.CornerPx(s);
         /// <summary>How far the launcher window sits inside the frame, so it stays clear of the rounded corners.</summary>
         int FrameInset => (int)Math.Ceiling(TopRadius * 0.3) + 1;
         bool SearchBelow => settings.LauncherPosition == "Bottom"; // results above, search box at the bottom

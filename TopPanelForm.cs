@@ -30,8 +30,8 @@ namespace WispR
         // ---- geometry ----
         int PanelW => (int)(780 * s);
         int PanelH => (int)(300 * s);
-        int Flare => (int)(18 * s);
-        int Radius => (int)(18 * s);
+        int Flare => Ui.CornerPx(s);
+        int Radius => Ui.CornerPx(s);
         int TabH => (int)(58 * s);
         Rectangle screenRect;      // where the window is when fully open (screen coordinates)
         int topEdge;
@@ -178,7 +178,7 @@ namespace WispR
                               Math.Abs(c.X - (scr.Bounds.X + scr.Bounds.Width / 2)) <= PanelW / 2;
                 if (!atEdge) { atEdgeSince = DateTime.MinValue; return; }
                 if (atEdgeSince == DateTime.MinValue) atEdgeSince = DateTime.Now;
-                if ((DateTime.Now - atEdgeSince).TotalMilliseconds >= 90) { atEdgeSince = DateTime.MinValue; OpenPanel(scr, edge.Value); }
+                if ((DateTime.Now - atEdgeSince).TotalMilliseconds >= settings.TopPanelDelay) { atEdgeSince = DateTime.MinValue; OpenPanel(scr, edge.Value); }
                 return;
             }
             if (closing || seeking) return;
@@ -201,7 +201,13 @@ namespace WispR
             int w = PanelW + Flare * 2;
             screenRect = new Rectangle(scr.Bounds.X + (scr.Bounds.Width - w) / 2, edge, w, PanelH);
             open = true; closing = false; outsideSince = DateTime.MinValue;
-            if (!tabChosen) tab = info != null ? 0 : 1; // something playing → Media first
+            switch (settings.TopPanelTab)
+            {
+                case "Media": tab = 0; break;
+                case "Performance": tab = 1; break;
+                case "Last": break; // where you left it
+                default: if (!tabChosen) tab = info != null ? 0 : 1; break; // something playing → Media first
+            }
             media.Paused = false;
             Sample();
             BuildFonts();
@@ -702,7 +708,7 @@ namespace WispR
 
         void EnsureVinyl(MediaInfo i, int size)
         {
-            string key = i.Key + "|" + size + "|" + (i.Thumbnail?.GetHashCode() ?? 0);
+            string key = i.Key + "|" + size + "|" + (i.Thumbnail?.GetHashCode() ?? 0) + "|" + Vinyl.Fixed;
             if (key == vinylKey) return;
             vinylKey = key;
             vinyl?.Dispose();

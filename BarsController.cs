@@ -50,8 +50,6 @@ namespace WispR
 
         WindowTracker tracker;
         TrayService tray;
-        PerfBoxForm perfbox;
-        MediaBoxForm mediabox;
         StartMenuForm startMenu;
         readonly List<MonitorBars> monitors = new List<MonitorBars>();
         bool running, userHidden;
@@ -113,9 +111,6 @@ namespace WispR
                 m.StartBox.SetHeight(m.Taskbar.BarHeight);
                 m.StartBox.ApplyTheme();
             }
-            int h = Main.Taskbar.BarHeight;
-            perfbox.SetHeight(h); perfbox.ApplyTheme();
-            mediabox.SetHeight(h); mediabox.ApplyTheme();
             topPanel?.SetEnabled(settings.TopPanel);
             LayoutAll();
         }
@@ -134,14 +129,6 @@ namespace WispR
                 ToggleTaskbarPin = e => Taskbar?.TogglePin(e),
                 BeforeLeaving = PrepareForSessionEnd,
             };
-            perfbox = new PerfBoxForm(settings, backdrop)
-            {
-                HideBox = () => Later(() => { settings.ShowPerfBox = false; settings.NotifyChanged(); }),
-            };
-            perfbox.SizeWanted += LayoutAll;
-            mediabox = new MediaBoxForm(settings, backdrop) { ActivateApp = ActivateMediaApp };
-            mediabox.SizeWanted += LayoutAll;
-            mediabox.HasMediaChanged += LayoutAll;
 
             BuildMonitors();
             ExplorerTaskbar.Hide(settings);
@@ -161,8 +148,6 @@ namespace WispR
             DisposeMonitors();
             startMenu?.Dispose(); startMenu = null;
             topPanel?.Dispose(); topPanel = null;
-            perfbox?.Dispose(); perfbox = null;
-            mediabox?.Dispose(); mediabox = null;
             tray?.Dispose(); tray = null;
             tracker?.Dispose(); tracker = null;
             ExplorerTaskbar.Restore(settings);
@@ -276,21 +261,11 @@ namespace WispR
             int y = bottom ? scr.Bottom - gap - h : scr.Top + gap;
             int margin = Math.Max(gap, (int)(8 * s));
 
-            // The Start box takes the left corner; on the main monitor the CPU/RAM box and the player follow.
+            // The Start box takes the left corner (media and performance live in the top drop-down).
             int leftEdge = scr.X + margin;
             var stb = m.StartBox.Measure();
             int startX = leftEdge;
             if (settings.ShowStartButton) leftEdge += stb.Width + between;
-            int perfX = leftEdge, mediaX = leftEdge;
-            Size pb = Size.Empty, mb = Size.Empty;
-            if (m.Primary)
-            {
-                pb = perfbox.Measure();
-                mb = mediabox.Measure();
-                if (PerfShown) leftEdge = perfX + pb.Width + between;
-                mediaX = leftEdge;
-                if (MediaShown) leftEdge = mediaX + mb.Width + between;
-            }
 
             int tbX, sbX;
             bool beside = settings.SystemBoxPlace == "Beside";
@@ -324,14 +299,7 @@ namespace WispR
             m.StartBox.Invalidate();
             m.Taskbar.Invalidate();
             m.SysBox.Invalidate();
-            if (m.Primary)
-            {
-                tray?.SetRect(new Rectangle(scr.X, y, scr.Width, h));
-                perfbox.Bounds = new Rectangle(perfX, y, pb.Width, h);
-                mediabox.Bounds = new Rectangle(mediaX, y, mb.Width, h);
-                perfbox.Invalidate();
-                mediabox.Invalidate();
-            }
+            if (m.Primary) tray?.SetRect(new Rectangle(scr.X, y, scr.Width, h));
             UpdateVisibility(m);
         }
 
@@ -388,11 +356,6 @@ namespace WispR
             SetVisible(m.Taskbar, show, a);
             SetVisible(m.SysBox, show, a);
             SetVisible(m.StartBox, show && settings.ShowStartButton, a);
-            if (m.Primary)
-            {
-                SetVisible(perfbox, show && PerfShown, a);
-                SetVisible(mediabox, show && MediaShown, a);
-            }
 
             // The frame around the screen (never animated: it's drawn with per-pixel transparency).
             // Only while no window is maximized on this screen: a maximized window fills the screen as
@@ -416,11 +379,6 @@ namespace WispR
             m.Taskbar.OnBand = inBand;
             m.SysBox.OnBand = inBand;
             m.StartBox.OnBand = inBand;
-            if (m.Primary)
-            {
-                if (perfbox != null) perfbox.OnBand = inBand;
-                if (mediabox != null) mediabox.OnBand = inBand;
-            }
 
             // Only touch the reservation when it really changes; every change makes Windows re-fit maximized windows.
             bool reserve = settings.ReserveSpace && !userHidden;
@@ -615,7 +573,7 @@ namespace WispR
 
         bool FrameOn => settings.ScreenFrame;
         int FrameSide => (int)(settings.FrameThickness * s);
-        int FrameRadius => (int)(16 * s);
+        int FrameRadius => Ui.CornerPx(s);
 
         Rectangle FrameInner(MonitorBars m) => FrameForm.Inner(m.Screen.Bounds, FrameSide, Thickness(m), settings.TaskbarEdge != "Top");
 
@@ -711,11 +669,6 @@ namespace WispR
                     m.Taskbar.EnsureShown(slowTick);
                     m.SysBox.EnsureShown(slowTick);
                     if (settings.ShowStartButton) m.StartBox.EnsureShown(slowTick);
-                    if (m.Primary)
-                    {
-                        if (PerfShown) perfbox.EnsureShown(slowTick);
-                        if (MediaShown) mediabox.EnsureShown(slowTick);
-                    }
                 }
                 EnforceReservation(m, slowTick);
             }
@@ -776,7 +729,6 @@ namespace WispR
         void KeepBelowBars(MonitorBars m, IntPtr win)
         {
             var bars = new List<Form> { m.Taskbar, m.SysBox, m.StartBox };
-            if (m.Primary) { bars.Add(perfbox); bars.Add(mediabox); }
             if (m.Strip.Visible) bars.Add(m.Strip);
             for (int pass = 0; pass < 5; pass++)
             {
@@ -794,7 +746,6 @@ namespace WispR
         void KeepStripBelowBars(MonitorBars m)
         {
             var bars = new List<Form> { m.Taskbar, m.SysBox, m.StartBox };
-            if (m.Primary) { bars.Add(perfbox); bars.Add(mediabox); }
             for (int pass = 0; pass < 4; pass++)
             {
                 bool moved = false;
@@ -895,8 +846,6 @@ namespace WispR
         static extern int SHQueryUserNotificationState(out int state);
 
         // with the top drop-down on, media and performance live there instead of on the bar
-        bool MediaShown => settings.ShowMediaBox && !settings.TopPanel && mediabox != null && mediabox.HasMedia;
-        bool PerfShown => settings.ShowPerfBox && !settings.TopPanel;
         TopPanelForm topPanel;
 
         /// <summary>Where the top drop-down hangs on a screen (below the frame), or null when it shouldn't open there.</summary>

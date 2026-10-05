@@ -56,8 +56,8 @@ namespace WispR
             st.Alpha = alpha;
             st.Closing = false;
             st.Edge = edge;
-            st.Radius = (int)(14 * scale);
-            st.Flare = curves ? (int)(14 * scale) : 1;
+            st.Radius = Ui.CornerPx(scale);
+            st.Flare = curves ? Ui.CornerPx(scale) : 1;
             st.Theme = theme;
             st.Background = background;
             st.Bg?.Dispose(); st.Bg = null;

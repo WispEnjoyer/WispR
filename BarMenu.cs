@@ -71,7 +71,7 @@ namespace WispR
         }
 
         int FrameInset => (int)Math.Ceiling(Radius * 0.3) + 1;
-        int Radius => S(12);
+        int Radius => Ui.CornerPx(s);
 
         /// <summary>
         /// Shows the menu growing up out of the bar: its bottom sits on <paramref name="edge"/> (the top of

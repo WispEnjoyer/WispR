@@ -102,11 +102,16 @@ namespace WispR
         public int FrameThickness = 8;          // its width on the three sides without bars
         public bool FillWhenMaximized = true;   // solid full-width band behind the bars while a window is maximized
         public bool ShowStartButton = true;
-        public bool ShowPerfBox = true;         // CPU / RAM box in the bottom-left corner
-        public bool ShowMediaBox = true;        // now-playing box next to it
         public bool ThemedTrayMenus = true;     // show tray icons' right-click menus in WispR's style
         public bool TopPanel = true;
         public bool ShowNotch = true;          // the little tab at the top edge that marks the drop-down
+        public int TopPanelDelay = 90;         // ms the mouse rests at the top edge before the drop-down opens
+        public string TopPanelTab = "Auto";    // which tab it opens on: Auto (Media while something plays) / Media / Performance / Last
+        public string VinylStyle = "Random";   // the record's look: Random (picked per song) or one style for all
+        public int CornerRadius = 16;          // roundness of the launcher, popups, drop-down, timers and frame (0-28)
+        public string Animations = "Normal";   // Off / Fast / Normal / Relaxed
+        public int LauncherRows = 8;           // results shown at once
+        public bool TimerSound = true;         // a soft chime when a timer ends
         public int VinylRpm = 12;               // how fast the record in the Media tab turns (0 = still)            // media + performance in a drop-down from the top edge (instead of the boxes)
         public bool ShowTaskView = false;
         public bool ShowTray = true;
@@ -157,8 +162,18 @@ namespace WispR
 
         public void NotifyChanged()
         {
+            Validate();
+            ApplyGlobals();
             Save();
             Changed?.Invoke();
+        }
+
+        /// <summary>Settings that everything reads directly: corner roundness, animation speed, the record's look.</summary>
+        public void ApplyGlobals()
+        {
+            Ui.Corner = CornerRadius;
+            Anim.Speed = Animations == "Off" ? 0 : Animations == "Fast" ? 0.6 : Animations == "Relaxed" ? 1.45 : 1;
+            Vinyl.Fixed = VinylStyle != "Random" && Enum.TryParse(VinylStyle, out Vinyl.Style st) ? st : (Vinyl.Style?)null;
         }
 
         public void ResetAppearance()
@@ -214,6 +229,7 @@ namespace WispR
             }
             catch { /* use defaults */ }
             s.Validate();
+            s.ApplyGlobals();
             s.TrayExpanded = false; // tray icons always start tucked away; the arrow shows them
             return s;
         }
@@ -227,6 +243,12 @@ namespace WispR
             FrameThickness = Clamp(FrameThickness, 2, 40);
             VinylRpm = Clamp(VinylRpm, 0, 45);
             DoubleTapMs = Clamp(DoubleTapMs, 150, 800);
+            TopPanelDelay = Clamp(TopPanelDelay, 0, 600);
+            CornerRadius = Clamp(CornerRadius, 0, 28);
+            LauncherRows = Clamp(LauncherRows, 4, 12);
+            if (TopPanelTab != "Media" && TopPanelTab != "Performance" && TopPanelTab != "Last") TopPanelTab = "Auto";
+            if (Animations != "Off" && Animations != "Fast" && Animations != "Relaxed") Animations = "Normal";
+            if (VinylStyle != "Random" && !Enum.GetNames(typeof(Vinyl.Style)).Contains(VinylStyle)) VinylStyle = "Random";
             if (!SearchEngines.ContainsKey(SearchEngine)) SearchEngine = "Google";
             if (LauncherPosition != "Center" && LauncherPosition != "Top") LauncherPosition = "Bottom";
             if (WallpaperSource != "Engine" && WallpaperSource != "All") WallpaperSource = "Favorites";

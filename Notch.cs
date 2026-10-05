@@ -81,7 +81,7 @@ namespace WispR
             if (theme == null) return;
             float e = (float)Anim.OutCubic(level);
             int bodyW = (int)Math.Round((54 + 34 * e) * s), h = (int)Math.Round((7 + 4 * e) * s);
-            int flare = (int)Math.Round(6 * s), radius = Math.Max(2, Math.Min(h, (int)(7 * s)));
+            int flare = Math.Max(1, (int)Math.Round(Ui.Corner * 0.4f * s)), radius = Math.Max(1, Math.Min(h, (int)(Ui.Corner * 0.45f * s))); // follows the corner roundness
             int w = bodyW + flare * 2;
             string key = centerX + "|" + edge + "|" + w + "|" + h + "|" + (int)(e * 64) + "|" + theme.Accent.ToArgb() + theme.Background.ToArgb() + alpha;
             if (key == drawnKey) return;

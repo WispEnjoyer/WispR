@@ -92,18 +92,6 @@ it. Apps with several windows show one preview per window.
 Pin / Unpin from taskbar, Open file location, Restore / Minimize / Maximize, End task, and
 Close window(s). Pin apps from here or from the launcher's right-click menu.
 
-**CPU / RAM box** (bottom-left corner) — live CPU and memory use with a 30-second graph and
-a load bar (accent colour normally, amber above 60 %, red above 85 %). Hover for details
-(e.g. "11.4 of 16.0 GB in use"); click it or the icon for Task Manager; right-click for
-Resource Monitor or to hide the box (Settings → Taskbar brings it back).
-
-**Media player** (next to the CPU / RAM box, only while something plays) — cover art, title,
-artist and progress for Spotify, YouTube in your browser, media players and anything else
-that shows up in Windows' own media controls. Previous / play-pause / next buttons; click the
-title to bring the app to the front. **Click or drag the progress line to jump** within the
-song. (Some apps, e.g. Firefox-based browsers, don't report a song length — then there's no
-progress line.)
-
 **System box**
 - *Tray icons* — the usual app icons, left/right/double-click work as normal. Right-click
   menus that are standard Windows menus (and WispR's own) are shown in WispR's style,
@@ -156,7 +144,8 @@ live when you pick another one):
 
 - **Appearance** — pick one of 8 themes from preview tiles (Midnight, Light, Nord, Dracula,
   Catppuccin, Gruvbox, Rosé Pine, Solarized Light), or click any colour to make your own
-  palette; opacity and launcher width.
+  palette; opacity and launcher width; **corner roundness** (one value for the launcher, popups,
+  drop-down, timers and screen frame) and **animations** (off, fast, normal or relaxed).
 - **Background** — use your desktop wallpaper (it follows changes, including Wallpaper Engine)
   or a picture of your own; show it behind the launcher and bars or only take its colours;
   tint and blur; **Match theme colours** builds the palette from the picture (Auto, Dark or
@@ -170,22 +159,20 @@ live when you pick another one):
   launcher grows out of its top edge. It steps aside while a window is maximized on that screen
   (the window fills the screen as usual, above the bars). Clicks pass through it; it hides for
   fullscreen apps and with the double-tap, like the bars.
-- **Top drop-down** (in On the bars, on by default) — touch the top edge of the screen with the
-  mouse (around the middle) and a panel slides down out of the frame; move away and it slides
-  back up. **Media**: cover, title, artist, a progress bar you can click or drag to seek, and
-  previous / play-pause / next. A vinyl record slides out from behind the cover and spins while
-  the song plays — coloured from the cover, in a pressing picked per song (solid, splatter,
-  swirl, smoke, galaxy, pinwheel, bullseye, marble, glitter or haze), with the
-  cover as its label. The progress is a waveform in the cover's colour (click or drag to seek;
-  hovering previews the time), and the play button takes the cover's colour too. **Performance**: CPU, memory and GPU temperature as rings
-  (orange/red when busy or hot). The GPU temperature and load come from AMD's driver library
-  (Radeon cards); on other GPUs that ring shows "unavailable". It doesn't open while you drag a window to the top, or over
-  fullscreen games and videos. With it on, the CPU/RAM and media boxes leave the bar.
-- **On the bars** — which boxes and items show (Start, Task view, CPU/RAM, media, tray,
+- **Drop-down** — the panel that slides down when the mouse rests at the top edge of the screen
+  (marked by a notch). **Media**: cover, title, artist, a waveform you can click or drag to seek,
+  and previous / play-pause / next; a vinyl record coloured from the cover spins while the song
+  plays. **Performance**: CPU, memory and GPU temperature as gauges with a 40-second graph each
+  (GPU readings come from AMD's driver library; other GPUs show "unavailable"). Settings: on/off,
+  the notch, how long the mouse rests before it opens, which tab it opens on, the record's speed,
+  and its look (a different pressing per song, or always the same one). It doesn't open while you
+  drag a window to the top, or over fullscreen games and videos.
+- **On the bars** — which boxes and items show (Start, Task view, tray,
   keyboard layout, network, speed, volume, battery, notifications, clock, date, seconds,
   show-desktop corner).
 - **General** — Windows-key takeover and double-tap speed, launcher position, web search
-  engine, the Start menu name and account picture, start with Windows.
+  engine, how many results the launcher shows, the timer sound, the Start menu name and account
+  picture, start with Windows.
 - **Preview launcher** (bottom left) opens the launcher so you can see your changes.
 
 </details>
@@ -343,8 +330,8 @@ The exe lands in `bin\Release\net48\`.
 | `BarForm.cs`, `TaskbarForm.cs`, `SystemBoxForm.cs` | The taskbar and system-box windows |
 | `BarMenu.cs` | The themed right-click menus on the bars |
 | `PreviewForm.cs` | Live window previews when hovering an app |
-| `PerfBoxForm.cs` | The CPU / RAM box with the Task Manager button |
-| `MediaBoxForm.cs`, `MediaService.cs` | The media player box and reading "now playing" from Windows |
+| `MediaService.cs` | Reading "now playing" from Windows |
+| `ImageLoad.cs` | Safe, size-checked loading of pictures from outside (scaled to what's needed) |
 | `WinRtEventSink.cs` | Listens to Windows' media change events (keeps the song length and position up to date) |
 | `Timers.cs`, `TimerWidget.cs` | Timers from the launcher and their widget on the right edge |
 | `Playhead.cs` | WispR's own clock for the song position, so junk reports from apps can't reset it |

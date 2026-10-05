@@ -39,8 +39,8 @@ namespace WispR
             smallFont = new Font("Segoe UI", 8.5f), tinyTimeFont = new Font("Segoe UI Semibold", 8.5f), headFont = new Font("Segoe UI Semibold", 9f);
         Font glyphFont;
 
-        int Flare => (int)(14 * s);
-        int Radius => (int)(14 * s);
+        int Flare => Ui.CornerPx(s);
+        int Radius => Ui.CornerPx(s);
         const int MaxRows = 5;
 
         public TimerWidget(Settings settings)
@@ -127,7 +127,7 @@ namespace WispR
         {
             ringingSince = ringStarted = DateTime.Now;
             SetOpen(true);
-            PlayChime();
+            if (settings.TimerSound) PlayChime();
             // the glow pulses at ~30 frames a second (plenty for a slow pulse)
             if (!Anim.FramesRunning(PulseKey)) Anim.Frames(PulseKey, () =>
             {

@@ -17,8 +17,12 @@ namespace WispR
         public enum Style { Solid, Splatter, Swirl, Smoke, Galaxy, Pinwheel, Bullseye, Marble, Glitter, Haze }
 
         /// <summary>A stable "random" design for a song (the same song always gets the same record).</summary>
+        /// <summary>The "Record look" setting: one style for every song, or null to pick one per song.</summary>
+        public static Style? Fixed;
+
         public static Style StyleFor(string key)
         {
+            if (Fixed.HasValue) return Fixed.Value;
             int h = 17;
             foreach (char c in key ?? "") h = unchecked(h * 31 + c);
             var all = (Style[])Enum.GetValues(typeof(Style));

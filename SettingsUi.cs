@@ -288,6 +288,12 @@ namespace WispR
 
     static class Ui
     {
+        /// <summary>The "Corner roundness" setting, in logical pixels (shared by every outline).</summary>
+        public static int Corner = 16;
+
+        /// <summary>The corner radius in device pixels at scale <paramref name="s"/> (never 0: the outlines need a curve).</summary>
+        public static int CornerPx(float s) => Math.Max(1, (int)Math.Round(Corner * s));
+
         public static GraphicsPath Round(RectangleF r, float radius)
         {
             float d = Math.Max(1, Math.Min(radius * 2, Math.Min(r.Width, r.Height)));
