@@ -185,6 +185,7 @@ namespace WispR
             if (Timers.Items.Count == 0) return;
             var place = Placement(out _);
             if (place == null) { if (Visible) Hide(); return; }
+            edgeInset = Math.Max(0, Screen.PrimaryScreen.Bounds.Right - place.Value.edge);
             using var bmp = Paint();
             int w = bmp.Width, h = bmp.Height;
             var pos = new Rectangle(place.Value.edge - w, place.Value.centerY - h / 2, w, h);
@@ -192,6 +193,8 @@ namespace WispR
             Push(bmp, pos.Location);
             if (!Visible) { Show(); KeepOnTop(); }
         }
+
+        int edgeInset; // the frame strip to the right of the widget: same colour, so it looks like part of the tab
 
         /// <summary>The widget as it looks right now.</summary>
         Bitmap Paint()
@@ -218,8 +221,10 @@ namespace WispR
                 g.SetClip(shape);
 
                 var body = new Rectangle(0, fl, w, len);
+                // centred on what you see: the tab plus the frame strip it merges into
+                var seen = new Rectangle(0, fl, w + edgeInset, len);
                 float collapsedAlpha = Math.Max(0, 1 - open * 2.2f), listAlpha = Math.Max(0, (open - 0.45f) / 0.55f);
-                if (collapsedAlpha > 0.01f) DrawCollapsed(g, body, collapsedAlpha);
+                if (collapsedAlpha > 0.01f) DrawCollapsed(g, seen, collapsedAlpha);
                 if (listAlpha > 0.01f) DrawList(g, body, listAlpha);
             }
             return bmp;
