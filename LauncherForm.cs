@@ -1060,8 +1060,7 @@ namespace WispR
         /// </summary>
         sealed class SmoothList : ListBox
         {
-            Bitmap buffer;
-            public Action<Graphics, Rectangle> PaintEmpty; // the area below the last row
+            public Action<Graphics, Rectangle> PaintEmpty; // the list's background (behind and below the rows)
 
             protected override void WndProc(ref Message m)
             {
@@ -1077,37 +1076,31 @@ namespace WispR
                 try
                 {
                     int w = Math.Max(1, ClientSize.Width), h = Math.Max(1, ClientSize.Height);
-                    if (buffer == null || buffer.Width != w || buffer.Height != h) { buffer?.Dispose(); buffer = new Bitmap(w, h, PixelFormat.Format32bppRgb); } // no alpha: GDI text draws cleanly
-                    using (var g = Graphics.FromImage(buffer))
+                    var all = new Rectangle(0, 0, w, h);
+                    // WinForms' own double buffer: a screen-compatible memory surface, so Windows' text
+                    // (ClearType, the grey subtitles) draws exactly as it does on screen
+                    using var buffered = BufferedGraphicsManager.Current.Allocate(hdc, all);
+                    var g = buffered.Graphics;
+                    // the whole list first gets its background, so nothing (like a black seam) can show
+                    // between rows
+                    if (PaintEmpty != null) PaintEmpty(g, all);
+                    else using (var b = new SolidBrush(BackColor)) g.FillRectangle(b, all);
+                    int sel = SelectedIndex;
+                    for (int i = Math.Max(0, TopIndex), y = 0; i < Items.Count && y < h; i++)
                     {
-                        int y = 0, sel = SelectedIndex;
-                        for (int i = Math.Max(0, TopIndex); i < Items.Count && y < h; i++)
-                        {
-                            var r = GetItemRectangle(i);
-                            y = r.Bottom;
-                            var state = i == sel ? DrawItemState.Selected | (Focused ? DrawItemState.Focus : 0) : DrawItemState.None;
-                            g.ResetClip();
-                            g.SetClip(r);
-                            OnDrawItem(new DrawItemEventArgs(g, Font, r, i, state, ForeColor, BackColor));
-                        }
-                        g.ResetClip();
-                        if (y < h)
-                        {
-                            var rest = new Rectangle(0, y, w, h - y);
-                            if (PaintEmpty != null) PaintEmpty(g, rest);
-                            else using (var b = new SolidBrush(BackColor)) g.FillRectangle(b, rest);
-                        }
+                        var r = GetItemRectangle(i);
+                        y = r.Bottom;
+                        var state = i == sel ? DrawItemState.Selected | (Focused ? DrawItemState.Focus : 0) : DrawItemState.None;
+                        var saved = g.Save();
+                        g.SetClip(r);
+                        OnDrawItem(new DrawItemEventArgs(g, Font, r, i, state, ForeColor, BackColor));
+                        g.Restore(saved);
                     }
-                    using (var screen = Graphics.FromHdc(hdc)) screen.DrawImageUnscaled(buffer, 0, 0);
+                    buffered.Render(hdc);
                 }
                 finally { EndPaint(Handle, ref ps); }
             }
 
-            protected override void Dispose(bool disposing)
-            {
-                if (disposing) buffer?.Dispose();
-                base.Dispose(disposing);
-            }
 
             [StructLayout(LayoutKind.Sequential)]
             struct PAINTSTRUCT
@@ -1179,8 +1172,10 @@ namespace WispR
             // The row's slice of the background, copied 1:1 through a texture brush. (DrawImage with a source
             // rectangle blends the slice's edge pixels with transparency, which left faint seams between rows.)
             var bgBrush = RowBackgroundBrush();
+            g.SmoothingMode = SmoothingMode.None; // crisp row edges: no half-covered seam pixels
             if (bgBrush != null) g.FillRectangle(bgBrush, b);
             else using (var bg = new SolidBrush(T.Background)) g.FillRectangle(bg, b);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
 
             bool selected = (e.State & DrawItemState.Selected) != 0;

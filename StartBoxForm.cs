@@ -35,7 +35,7 @@ namespace WispR
             RequestRelayout();
         }
 
-        int IconPx => settings.TaskbarIconSize == "Small" ? S(20) : settings.TaskbarIconSize == "Large" ? S(30) : S(24);
+        int IconPx => settings.TaskbarIconSize == "Small" ? S(22) : settings.TaskbarIconSize == "Large" ? S(34) : S(28);
 
         public override Size Measure()
         {
