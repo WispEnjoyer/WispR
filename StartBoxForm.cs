@@ -35,13 +35,14 @@ namespace WispR
             RequestRelayout();
         }
 
-        int IconPx => settings.TaskbarIconSize == "Small" ? S(22) : settings.TaskbarIconSize == "Large" ? S(34) : S(28);
+        int IconPx => settings.TaskbarIconSize == "Small" ? S(23) : settings.TaskbarIconSize == "Large" ? S(34) : S(28);
+        int ButtonPx => (settings.TaskbarIconSize == "Small" ? S(20) : settings.TaskbarIconSize == "Large" ? S(30) : S(24)) + S(16);
 
         public override Size Measure()
         {
             items.Clear();
             int h = barHeight > 0 ? barHeight : S(48);
-            int bw = IconPx + S(16), top = (h - bw) / 2, x = S(4);
+            int bw = ButtonPx, top = (h - bw) / 2, x = S(4);
             var startRect = new Rectangle(x, top, bw, bw);
             items.Add(new BarItem
             {

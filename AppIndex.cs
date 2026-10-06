@@ -186,7 +186,30 @@ namespace WispR
 
         public static Bitmap Load(string parsingName) => Load(parsingName, Size);
 
-        public static Bitmap Load(string parsingName, int size) => Load(parsingName, size, SIIGBF_ICONONLY);
+        /// <summary>
+        /// An app's icon at <paramref name="size"/> pixels: fetched at twice the size and scaled down once,
+        /// smoothly — icons fetched at exactly their display size looked blocky (old Windows icons especially).
+        /// </summary>
+        public static Bitmap Load(string parsingName, int size)
+        {
+            var big = Load(parsingName, Math.Min(256, size * 2), SIIGBF_ICONONLY);
+            if (big == null || (big.Width <= size && big.Height <= size)) return big;
+            try
+            {
+                var small = new Bitmap(size, size, PixelFormat.Format32bppPArgb);
+                using (var g = Graphics.FromImage(small))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                    g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
+                    float sc = Math.Min(size / (float)big.Width, size / (float)big.Height);
+                    float w = big.Width * sc, h = big.Height * sc;
+                    g.DrawImage(big, new RectangleF((size - w) / 2, (size - h) / 2, w, h));
+                }
+                return small;
+            }
+            finally { big.Dispose(); }
+        }
 
         /// <summary>A picture's thumbnail from Windows' own thumbnail cache (fast, and already scaled).</summary>
         public static Bitmap LoadThumbnail(string path, int size) => Load(path, size, 0x8 /* THUMBNAILONLY */ | 0x1 /* BIGGERSIZEOK */);

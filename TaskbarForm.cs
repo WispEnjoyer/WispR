@@ -101,8 +101,9 @@ namespace WispR
             _ = Handle;
         }
 
-        int IconPx => settings.TaskbarIconSize == "Small" ? S(22) : settings.TaskbarIconSize == "Large" ? S(34) : S(28);
-        int ButtonPx => IconPx + S(16);
+        // the buttons (and so the bar) keep their size; the icons fill more of them
+        int IconPx => settings.TaskbarIconSize == "Small" ? S(23) : settings.TaskbarIconSize == "Large" ? S(34) : S(28);
+        int ButtonPx => (settings.TaskbarIconSize == "Small" ? S(20) : settings.TaskbarIconSize == "Large" ? S(30) : S(24)) + S(16);
         public int BarHeight => ButtonPx + S(8);
 
         int iconCacheSize;

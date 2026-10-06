@@ -1201,7 +1201,11 @@ namespace WispR
             int iconSz = IconPixelSize;
             var ir = new Rectangle(b.X + (int)(14 * s), b.Y + (rowH - iconSz) / 2, iconSz, iconSz);
             var icon = it.Entry?.Icon;
-            if (icon != null) g.DrawImage(icon, ir);
+            if (icon != null)
+            {
+                if (icon.Width == ir.Width && icon.Height == ir.Height) g.DrawImageUnscaled(icon, ir.Location); // already the right size: pixel for pixel
+                else g.DrawImage(icon, ir);
+            }
             else DrawGlyph(g, ir, it);
 
             int textX = ir.Right + (int)(12 * s);
