@@ -38,7 +38,7 @@ namespace WispR
         public static int IconPx = 24;
 
         // Why sessions were left out, for the log.
-        sealed class Tally { public int State, Expired, Own, NoVolume, Errors; public string FirstError; }
+        sealed class Tally { public int State, Expired, Own, NoVolume, Errors; public string FirstError, Detail; }
 
         static bool useWorker;    // read on a background (MTA) thread: the UI thread got nothing usable
         static bool triedWorker;
@@ -128,7 +128,8 @@ namespace WispR
         {
             // for the log (once per different outcome): how far it got and what it found
             string skipped = tally == null ? "" : " Skipped: " + tally.Expired + " ended, " + tally.State + " unreadable, " + tally.Own + " WispR's own, "
-                + tally.NoVolume + " without volume control, " + tally.Errors + " errors" + (tally.FirstError != null ? " (" + tally.FirstError + ")" : "") + ".";
+                + tally.NoVolume + " without volume control, " + tally.Errors + " errors" + (tally.FirstError != null ? " (" + tally.FirstError + ")" : "") + "."
+                + (tally.Detail != null ? " Details: " + tally.Detail + "." : "");
             string report = step == "done"
                 ? "Mixer: " + count + " sound sessions, " + kept + " usable, " + fresh.Count + " apps (" + string.Join(", ", fresh.Select(a => a.Name)) + ")." + skipped
                 : "Mixer: stopped at \"" + step + "\", error 0x" + hr.ToString("X8") + ".";
@@ -150,17 +151,45 @@ namespace WispR
             if (state == 2 /* expired */) { tally.Expired++; return false; }
             uint pid = 0; bool system = false;
             var iid2 = new Guid("bfb7ff88-7239-4fc9-8fa2-07c950be9c6d"); // IAudioSessionControl2: whose it is
-            if (Marshal.QueryInterface(control, ref iid2, out IntPtr c2) == 0 && c2 != IntPtr.Zero)
+            var iidVol = new Guid("87CE5498-68D6-44E5-9215-6F24D2593233"); // ISimpleAudioVolume
+            IntPtr vol = IntPtr.Zero;
+            int hrC2 = Marshal.QueryInterface(control, ref iid2, out IntPtr c2), hrVol = 0, hrVol2 = 0;
+            if (hrC2 == 0 && c2 != IntPtr.Zero)
                 try
                 {
                     Fn<FnOutUInt>(c2, 14)(c2, out pid);
                     system = Fn<FnNoArgs>(c2, 15)(c2) == 0; // S_OK: the system sounds session
+                    // the volume control, asked of the session's second interface
+                    hrVol2 = Marshal.QueryInterface(c2, ref iidVol, out vol);
                 }
                 finally { Marshal.Release(c2); }
-            if (!system && pid == ownPid) { tally.Own++; return false; } // WispR's own timer chime
+            if (!system && pid == ownPid) { if (vol != IntPtr.Zero) Marshal.Release(vol); tally.Own++; return false; } // WispR's own timer chime
 
-            var iidVol = new Guid("87CE5498-68D6-44E5-9215-6F24D2593233"); // ISimpleAudioVolume
-            if (Marshal.QueryInterface(control, ref iidVol, out IntPtr vol) != 0 || vol == IntPtr.Zero) { tally.NoVolume++; return false; }
+            if (vol == IntPtr.Zero) hrVol = Marshal.QueryInterface(control, ref iidVol, out vol);
+            if (vol == IntPtr.Zero)
+            {
+                // last try: through .NET's own COM wrapper
+                try
+                {
+                    var o = Marshal.GetObjectForIUnknown(control);
+                    try { if (o is ISimpleAudioVolumeRcw) vol = Marshal.GetComInterfaceForObject(o, typeof(ISimpleAudioVolumeRcw)); }
+                    finally { Marshal.ReleaseComObject(o); }
+                }
+                catch (Exception ex) { tally.FirstError ??= "wrapper: " + ex.GetType().Name + " " + ex.Message; }
+            }
+            if (vol == IntPtr.Zero)
+            {
+                if (tally.Detail == null)
+                {
+                    var iidMeter = new Guid("C02216F6-8C67-4B5B-9D00-D008E73E0064"); // IAudioMeterInformation, just to compare
+                    int hrMeter = Marshal.QueryInterface(control, ref iidMeter, out IntPtr meter);
+                    if (meter != IntPtr.Zero) Marshal.Release(meter);
+                    tally.Detail = "control2 0x" + hrC2.ToString("X8") + ", volume 0x" + hrVol.ToString("X8") + ", volume via control2 0x" + hrVol2.ToString("X8")
+                                 + ", meter 0x" + hrMeter.ToString("X8") + ", pid " + pid + ", thread " + System.Threading.Thread.CurrentThread.GetApartmentState();
+                }
+                tally.NoVolume++;
+                return false;
+            }
 
             string path = system ? null : PathOf(pid);
             string key = system ? "|system" : path ?? ("pid:" + pid);
@@ -305,6 +334,15 @@ namespace WispR
                 fns[(fn, typeof(T))] = d = Marshal.GetDelegateForFunctionPointer(fn, typeof(T));
             }
             return (T)d;
+        }
+
+        [ComImport, Guid("87CE5498-68D6-44E5-9215-6F24D2593233"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface ISimpleAudioVolumeRcw
+        {
+            [PreserveSig] int SetMasterVolume(float level, ref Guid ctx);
+            [PreserveSig] int GetMasterVolume(out float level);
+            [PreserveSig] int SetMute(int mute, ref Guid ctx);
+            [PreserveSig] int GetMute(out int mute);
         }
 
         [DllImport("ole32.dll")] static extern int CoCreateInstance(ref Guid clsid, IntPtr outer, int clsCtx, ref Guid iid, out IntPtr obj);
