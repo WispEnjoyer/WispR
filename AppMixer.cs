@@ -37,10 +37,43 @@ namespace WispR
         public static IReadOnlyList<MixerApp> Apps => apps;
         public static int IconPx = 24;
 
+        // Why sessions were left out, for the log.
+        sealed class Tally { public int State, Expired, Own, NoVolume, Errors; public string FirstError; }
+
+        static bool useWorker;    // read on a background (MTA) thread: the UI thread got nothing usable
+        static bool triedWorker;
+
         /// <summary>Reads the sessions again. True when the set of programs changed (not just their levels).</summary>
         public static bool Refresh()
         {
+            var r = useWorker ? ReadOnWorker() : Read();
+            if (!useWorker && !triedWorker && r.count > 0 && r.kept == 0)
+            {
+                // Sessions there, but none could be used from this thread: Core Audio's objects can refuse
+                // some calls from a UI (single-threaded) apartment. Try once from a free-threaded one.
+                triedWorker = true;
+                var w = ReadOnWorker();
+                Log.Write("Mixer: nothing usable on the UI thread, a background thread got " + w.kept + " of " + w.count + ".");
+                if (w.kept > 0) { useWorker = true; foreach (var a in r.fresh) ReleaseSessions(a); r = w; }
+                else foreach (var a in w.fresh) ReleaseSessions(a);
+            }
+            return Done(r.fresh, r.step, r.hr, r.count, r.kept, r.tally);
+        }
+
+        static (List<MixerApp> fresh, string step, int hr, int count, int kept, Tally tally) ReadOnWorker()
+        {
+            (List<MixerApp>, string, int, int, int, Tally) result = (new List<MixerApp>(), "worker", 0, -1, 0, new Tally());
+            var th = new System.Threading.Thread(() => { try { result = Read(); } catch { } }) { IsBackground = true };
+            th.SetApartmentState(System.Threading.ApartmentState.MTA);
+            th.Start();
+            if (!th.Join(3000)) Log.Write("Mixer: the background read took too long.");
+            return result;
+        }
+
+        static (List<MixerApp> fresh, string step, int hr, int count, int kept, Tally tally) Read()
+        {
             var fresh = new List<MixerApp>();
+            var tally = new Tally();
             IntPtr en = IntPtr.Zero, dev = IntPtr.Zero, mgr = IntPtr.Zero, list = IntPtr.Zero;
             string step = "create";
             int hr = 0, count = -1, kept = 0;
@@ -50,27 +83,27 @@ namespace WispR
                 var clsid = new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
                 var iidEnum = new Guid("A95664D2-9614-4F35-A746-DE8DB63617E6");
                 hr = CoCreateInstance(ref clsid, IntPtr.Zero, 0x17, ref iidEnum, out en);
-                if (hr != 0 || en == IntPtr.Zero) return Done(fresh, step, hr, count, kept);
+                if (hr != 0 || en == IntPtr.Zero) return (fresh, step, hr, count, kept, tally);
                 step = "default device";
                 hr = Fn<FnDefaultEndpoint>(en, 4)(en, 0 /* eRender */, 1 /* eMultimedia */, out dev);
-                if (hr != 0 || dev == IntPtr.Zero) return Done(fresh, step, hr, count, kept);
+                if (hr != 0 || dev == IntPtr.Zero) return (fresh, step, hr, count, kept, tally);
                 step = "session manager";
                 var iidMgr = new Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
                 hr = Fn<FnActivate>(dev, 3)(dev, ref iidMgr, 0x17, IntPtr.Zero, out mgr);
-                if (hr != 0 || mgr == IntPtr.Zero) return Done(fresh, step, hr, count, kept);
+                if (hr != 0 || mgr == IntPtr.Zero) return (fresh, step, hr, count, kept, tally);
                 step = "session list";
                 hr = Fn<FnOutPtr>(mgr, 5)(mgr, out list);
-                if (hr != 0 || list == IntPtr.Zero) return Done(fresh, step, hr, count, kept);
+                if (hr != 0 || list == IntPtr.Zero) return (fresh, step, hr, count, kept, tally);
                 step = "count";
                 hr = Fn<FnOutInt>(list, 3)(list, out count);
-                if (hr != 0) return Done(fresh, step, hr, count, kept);
+                if (hr != 0) return (fresh, step, hr, count, kept, tally);
                 step = "sessions";
                 var byKey = new Dictionary<string, MixerApp>(StringComparer.OrdinalIgnoreCase);
                 for (int i = 0; i < count && i < 200; i++)
                 {
                     if (Fn<FnIndexOutPtr>(list, 4)(list, i, out IntPtr control) != 0 || control == IntPtr.Zero) continue;
-                    try { if (Add(control, byKey, fresh)) kept++; }
-                    catch (Exception ex) { if (!loggedError) { loggedError = true; Log.Error("AppMixer.Add", ex); } }
+                    try { if (Add(control, byKey, fresh, tally)) kept++; }
+                    catch (Exception ex) { tally.Errors++; tally.FirstError ??= ex.GetType().Name + ": " + ex.Message; }
                     finally { Marshal.Release(control); }
                 }
                 step = "done"; hr = 0;
@@ -86,16 +119,18 @@ namespace WispR
                 if (dev != IntPtr.Zero) Marshal.Release(dev);
                 if (en != IntPtr.Zero) Marshal.Release(en);
             }
-            return Done(fresh, step, hr, count, kept);
+            return (fresh, step, hr, count, kept, tally);
         }
 
         static string lastReport;
 
-        static bool Done(List<MixerApp> fresh, string step, int hr, int count, int kept)
+        static bool Done(List<MixerApp> fresh, string step, int hr, int count, int kept, Tally tally)
         {
             // for the log (once per different outcome): how far it got and what it found
+            string skipped = tally == null ? "" : " Skipped: " + tally.Expired + " ended, " + tally.State + " unreadable, " + tally.Own + " WispR's own, "
+                + tally.NoVolume + " without volume control, " + tally.Errors + " errors" + (tally.FirstError != null ? " (" + tally.FirstError + ")" : "") + ".";
             string report = step == "done"
-                ? "Mixer: " + count + " sound sessions, " + kept + " usable, " + fresh.Count + " apps (" + string.Join(", ", fresh.Select(a => a.Name)) + ")."
+                ? "Mixer: " + count + " sound sessions, " + kept + " usable, " + fresh.Count + " apps (" + string.Join(", ", fresh.Select(a => a.Name)) + ")." + skipped
                 : "Mixer: stopped at \"" + step + "\", error 0x" + hr.ToString("X8") + ".";
             if (report != lastReport) { lastReport = report; Log.Write(report); }
 
@@ -109,9 +144,10 @@ namespace WispR
         }
 
         /// <summary>Adds one session (an IAudioSessionControl) to its program's entry. True when it was used.</summary>
-        static bool Add(IntPtr control, Dictionary<string, MixerApp> byKey, List<MixerApp> into)
+        static bool Add(IntPtr control, Dictionary<string, MixerApp> byKey, List<MixerApp> into, Tally tally)
         {
-            if (Fn<FnOutInt>(control, 3)(control, out int state) != 0 || state == 2 /* expired */) return false;
+            if (Fn<FnOutInt>(control, 3)(control, out int state) != 0) { tally.State++; return false; }
+            if (state == 2 /* expired */) { tally.Expired++; return false; }
             uint pid = 0; bool system = false;
             var iid2 = new Guid("bfb7ff88-7239-4fc9-8fa2-07c950be9c6d"); // IAudioSessionControl2: whose it is
             if (Marshal.QueryInterface(control, ref iid2, out IntPtr c2) == 0 && c2 != IntPtr.Zero)
@@ -121,10 +157,10 @@ namespace WispR
                     system = Fn<FnNoArgs>(c2, 15)(c2) == 0; // S_OK: the system sounds session
                 }
                 finally { Marshal.Release(c2); }
-            if (!system && pid == ownPid) return false; // WispR's own timer chime
+            if (!system && pid == ownPid) { tally.Own++; return false; } // WispR's own timer chime
 
             var iidVol = new Guid("87CE5498-68D6-44E5-9215-6F24D2593233"); // ISimpleAudioVolume
-            if (Marshal.QueryInterface(control, ref iidVol, out IntPtr vol) != 0 || vol == IntPtr.Zero) return false;
+            if (Marshal.QueryInterface(control, ref iidVol, out IntPtr vol) != 0 || vol == IntPtr.Zero) { tally.NoVolume++; return false; }
 
             string path = system ? null : PathOf(pid);
             string key = system ? "|system" : path ?? ("pid:" + pid);
