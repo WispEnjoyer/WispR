@@ -103,7 +103,8 @@ Close window(s). Pin apps from here or from the launcher's right-click menu.
   1 MB/s. Click for Task Manager.
 - *Volume* — click for a **volume slider** (with your output device, a mute button and a
   shortcut to sound settings). Scroll on the icon or the slider to change it, middle-click
-  to mute.
+  to mute. The arrow opens it further into a **mixer**: every app with sound gets its own
+  slider; click an app's icon to mute just that app.
 - *Network, battery* — click for Windows' quick settings.
 - *Clock* — click for the **calendar**: time with seconds, the full date, the month with
   week numbers (KW). Arrows or scrolling change the month; click the month name for today.
@@ -337,7 +338,8 @@ The exe lands in `bin\Release\net48\`.
 | `WinRtEventSink.cs` | Listens to Windows' media change events (keeps the song length and position up to date) |
 | `Timers.cs`, `TimerWidget.cs` | Timers from the launcher and their widget on the right edge |
 | `Playhead.cs` | WispR's own clock for the song position, so junk reports from apps can't reset it |
-| `VolumePopup.cs` | The volume slider popup |
+| `VolumePopup.cs` | The volume slider popup and its mixer |
+| `AppMixer.cs` | Per-app volumes (the apps playing sound) |
 | `Calculator.cs` | Maths and unit conversion in the launcher |
 | `SettingsCatalog.cs` | Windows settings pages the launcher can open |
 | `CalendarPopup.cs` | The clock / calendar popup |

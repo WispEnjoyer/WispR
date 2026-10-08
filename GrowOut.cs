@@ -23,6 +23,7 @@ namespace WispR
             public bool Hooked;
             public byte Alpha = 255;
             public bool Closing;
+            public bool Resizing;          // Resize() is moving it: the outline is redrawn once, afterwards
             public bool Proxying;          // the outline window is showing the animation picture; the popup itself is invisible
             public double TargetOpacity = 1;
             public Rectangle ProxyFrame;   // where the full picture goes when fully out
@@ -67,8 +68,8 @@ namespace WispR
             {
                 st.Hooked = true;
                 f.VisibleChanged += (o, e) => { if (!f.Visible) Hide(f); };
-                f.LocationChanged += (o, e) => { if (f.Visible && !st.Proxying && !Anim.IsRunning(Key(f))) Render(f); };
-                f.SizeChanged += (o, e) => { if (f.Visible && !st.Proxying && !Anim.IsRunning(Key(f))) Render(f); };
+                f.LocationChanged += (o, e) => { if (f.Visible && !st.Proxying && !st.Resizing && !Anim.IsRunning(Key(f))) Render(f); };
+                f.SizeChanged += (o, e) => { if (f.Visible && !st.Proxying && !st.Resizing && !Anim.IsRunning(Key(f))) Render(f); };
                 f.Disposed += (o, e) => { if (states.TryGetValue(f, out var s2)) { s2.Shell?.Dispose(); s2.Bg?.Dispose(); states.Remove(f); } };
             }
 
@@ -191,21 +192,58 @@ namespace WispR
             }, e => e * e);
         }
 
+        /// <summary>
+        /// Gives an open popup new bounds (taller, say), its outline following in the same step. The popup's
+        /// bottom should stay on the edge it grew from. Popups that didn't grow out of an edge just move.
+        /// </summary>
+        public static void Resize(Form f, Rectangle bounds)
+        {
+            if (f.IsDisposed) return;
+            if (!states.TryGetValue(f, out var st) || st.Shell == null || st.Shell.IsDisposed || !st.Shell.Visible || st.Proxying || st.Closing)
+            {
+                Move(f, bounds);
+                return;
+            }
+            st.Resizing = true;
+            try
+            {
+                // the outline first (it's behind and bigger), then the popup: no frame where they don't meet
+                RenderFor(f, st, bounds);
+                Move(f, bounds);
+            }
+            finally { st.Resizing = false; }
+        }
+
+        static void Move(Form f, Rectangle b)
+        {
+            if (f.Bounds == b) return;
+            if (!f.IsHandleCreated) { f.Bounds = b; return; }
+            // without copying the old picture over: the popup draws itself fresh at once
+            Native.SetWindowPos(f.Handle, IntPtr.Zero, b.X, b.Y, b.Width, b.Height, 0x0004 | 0x0010 | 0x0100 /* NOZORDER | NOACTIVATE | NOCOPYBITS */);
+            f.Invalidate();
+            f.Update();
+        }
+
         /// <summary>On its way out (clicking its button again should open it again, not close it twice).</summary>
         public static bool IsClosing(Form f) => states.TryGetValue(f, out var st) && st.Closing && Anim.IsRunning(Key(f));
 
         static void Render(Form f)
         {
             if (!states.TryGetValue(f, out var st) || st.Shell == null || st.Shell.IsDisposed || !f.Visible) return;
+            RenderFor(f, st, f.Bounds);
+        }
+
+        static void RenderFor(Form f, State st, Rectangle fb)
+        {
             int m = Inset(st.Radius), r = st.Radius, fl = st.Flare;
-            int top = Math.Min(f.Top - m, st.Edge - r * 2 - m); // stays a valid shape while still small
-            var frame = new Rectangle(f.Left - m - fl, top, f.Width + (m + fl) * 2, st.Edge - top);
-            var hole = Rectangle.Intersect(f.Bounds, new Rectangle(f.Left, f.Top, f.Width, Math.Max(0, st.Edge - f.Top)));
+            int top = Math.Min(fb.Top - m, st.Edge - r * 2 - m); // stays a valid shape while still small
+            var frame = new Rectangle(fb.Left - m - fl, top, fb.Width + (m + fl) * 2, st.Edge - top);
+            var hole = Rectangle.Intersect(fb, new Rectangle(fb.Left, fb.Top, fb.Width, Math.Max(0, st.Edge - fb.Top)));
             Bitmap bg = null;
             if (st.Background != null)
             {
                 // one picture for the whole final outline, reused for every animation frame
-                var full = new Rectangle(f.Left - m - fl, st.Edge - f.Height - m, f.Width + (m + fl) * 2, f.Height + m);
+                var full = new Rectangle(fb.Left - m - fl, st.Edge - fb.Height - m, fb.Width + (m + fl) * 2, fb.Height + m);
                 if (st.Bg == null || st.BgRect != full) { st.Bg?.Dispose(); st.Bg = st.Background(full); st.BgRect = full; }
                 bg = st.Bg;
             }
