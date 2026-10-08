@@ -30,9 +30,20 @@ namespace WispR
         // ---- geometry ----
         int PanelW => (int)(780 * s);
         int PanelH => (int)(300 * s);
-        int PickerH => (int)(470 * s);                       // taller while the record looks picker is open
-        float expand;                                        // 0 = normal height, 1 = picker height
+        int PickerH => (int)(590 * s);                       // the record looks picker takes much more room…
+        int PickerW => (int)(1100 * s);                      // …taller and wider
+        float expand;                                        // 0 = normal size, 1 = picker size
         int CurrentH => (int)Math.Round(PanelH + (PickerH - PanelH) * expand);
+        int CurrentW => (int)Math.Round(PanelW + (PickerW - PanelW) * expand);
+        int MaxW => PickerW + Flare * 2;
+        int panelCenterX;
+
+        /// <summary>The panel's rectangle at the current size, centred where it hangs.</summary>
+        void SizeToExpand()
+        {
+            int w = CurrentW + Flare * 2;
+            screenRect = new Rectangle(panelCenterX - w / 2, screenRect.Y, w, CurrentH);
+        }
         int Flare => Ui.CornerPx(s);
         int Radius => Ui.CornerPx(s);
         int TabH => (int)(58 * s);
@@ -203,7 +214,8 @@ namespace WispR
             if (notches.TryGetValue(scr.DeviceName, out var nn)) nn.Conceal(); // the panel takes over from the notch
             int w = PanelW + Flare * 2;
             expand = 0;
-            screenRect = new Rectangle(scr.Bounds.X + (scr.Bounds.Width - w) / 2, edge, w, CurrentH);
+            panelCenterX = scr.Bounds.X + scr.Bounds.Width / 2;
+            screenRect = new Rectangle(panelCenterX - w / 2, edge, w, CurrentH);
             open = true; closing = false; outsideSince = DateTime.MinValue;
             switch (settings.TopPanelTab)
             {
@@ -364,7 +376,7 @@ namespace WispR
         {
             if (!open) return;
             int w = screenRect.Width, h = screenRect.Height;
-            if (!EnsureDib(w, Math.Max(h, PickerH))) return;
+            if (!EnsureDib(Math.Max(w, MaxW), Math.Max(h, PickerH))) return;
             if (full || layersDirty || under == null) RenderLayers(w, h);
             using (var g = Graphics.FromImage(dibBmp))
             {
@@ -389,25 +401,33 @@ namespace WispR
         {
             layersDirty = false;
             buttons.Clear();
-            int hAlloc = Math.Max(h, PickerH); // big enough for the picker: growing doesn't reallocate per frame
-            if (under == null || under.Width != w || under.Height != hAlloc)
+            int hAlloc = Math.Max(h, PickerH), wAlloc = Math.Max(w, MaxW); // big enough for the picker: growing doesn't reallocate per frame
+            if (under == null || under.Width != wAlloc || under.Height != hAlloc)
             {
                 under?.Dispose(); over?.Dispose();
-                under = new Bitmap(w, hAlloc, PixelFormat.Format32bppPArgb);
-                over = new Bitmap(w, hAlloc, PixelFormat.Format32bppPArgb);
+                under = new Bitmap(wAlloc, hAlloc, PixelFormat.Format32bppPArgb);
+                over = new Bitmap(wAlloc, hAlloc, PixelFormat.Format32bppPArgb);
             }
             shape?.Dispose();
             // the outline: flares into the top edge, rounded bottom corners
             shape = LauncherShell.Shape(w, h, Flare, Radius);
             using (var flip = new Matrix(1, 0, 0, -1, 0, h)) shape.Transform(flip);
-            var body = new Rectangle(Flare, 0, PanelW, h);
+            var body = new Rectangle(Flare, 0, w - Flare * 2, h);
             content = Rectangle.FromLTRB(body.X + (int)(28 * s), TabH + (int)(14 * s), body.Right - (int)(28 * s), h - (int)(22 * s));
 
             using (var g = NewGraphics(under))
             {
-                string key = backdrop.KeyFor(screenRect) + settings.ShowImage;
-                if (key != bgKey) { bgKey = key; bg?.Dispose(); bg = settings.ShowImage ? backdrop.Render(screenRect) : null; }
-                if (bg != null) using (var tb = new TextureBrush(bg, WrapMode.Clamp)) g.FillPath(tb, shape);
+                // the background picture is made once for the biggest size the panel can grow to, and only
+                // shifted while it grows (rendering it per frame would be costly)
+                var bgArea = new Rectangle(panelCenterX - MaxW / 2, screenRect.Y, MaxW, Math.Max(PickerH, h));
+                string key = backdrop.KeyFor(bgArea) + settings.ShowImage;
+                if (key != bgKey) { bgKey = key; bg?.Dispose(); bg = settings.ShowImage ? backdrop.Render(bgArea) : null; }
+                if (bg != null)
+                    using (var tb = new TextureBrush(bg, WrapMode.Clamp))
+                    {
+                        tb.TranslateTransform(bgArea.X - screenRect.X, 0);
+                        g.FillPath(tb, shape);
+                    }
                 else using (var b = new SolidBrush(T.Background)) g.FillPath(b, shape);
                 using (var pen = new Pen(Color.FromArgb(90, T.Border))) g.DrawPath(pen, shape);
                 g.SetClip(shape);
@@ -469,7 +489,7 @@ namespace WispR
             IntPtr screenDc = GetDC(IntPtr.Zero);
             try
             {
-                var size = new SIZE { cx = dibBmp.Width, cy = Math.Min(dibBmp.Height, screenRect.Height) }; // only the panel's current height
+                var size = new SIZE { cx = Math.Min(dibBmp.Width, screenRect.Width), cy = Math.Min(dibBmp.Height, screenRect.Height) }; // only the panel's current size
                 var src = new POINT();
                 var dst = new POINT { x = pos.X, y = pos.Y };
                 byte alpha = (byte)Math.Max(0, Math.Min(255, settings.Opacity * 255 / 100));
@@ -527,7 +547,7 @@ namespace WispR
         bool recordsOpen;
         readonly Dictionary<Vinyl.Style, Bitmap> lookThumbs = new Dictionary<Vinyl.Style, Bitmap>();
         string lookThumbsKey;
-        static readonly Font lookFont = new Font("Segoe UI", 8.5f);
+        static readonly Font lookFont = new Font("Segoe UI", 9.5f);
 
         /// <summary>All record looks in the song's colours; click one to keep it out of the per-song mix (or let it back in).</summary>
         void DrawRecords(Graphics g, Rectangle r)
@@ -547,7 +567,7 @@ namespace WispR
             DrawText(g, note, smallFont, new Rectangle(back.Right + (int)(160 * s), r.Y, r.Width - (int)(300 * s), hh), T.SubText, left: true);
             if (hiddenCount > 0)
             {
-                var allR = new Rectangle(r.Right - (int)(80 * s), r.Y + (int)(2 * s), (int)(80 * s), hh - (int)(4 * s));
+                var allR = new Rectangle(r.Right + (PickerW - CurrentW) - (int)(80 * s), r.Y + (int)(2 * s), (int)(80 * s), hh - (int)(4 * s));
                 bool hot = allR.Contains(mouse);
                 using (var p = Ui.Round(allR, allR.Height / 2f)) using (var b = new SolidBrush(Color.FromArgb(hot ? 80 : 45, T.Accent))) g.FillPath(b, p);
                 DrawText(g, "Show all", smallFont, allR, hot ? T.Text : Ui.Mix(T.Accent, T.Text, 0.35f));
@@ -556,10 +576,10 @@ namespace WispR
 
             // the grid: three rows of eight, laid out for the picker's full height (it shows as the panel grows)
             int perRow = 8, rows = (all.Length + perRow - 1) / perRow;
-            int fullBottom = r.Bottom + (PickerH - CurrentH);
-            var grid = Rectangle.FromLTRB(r.X, r.Y + hh + (int)(12 * s), r.Right, fullBottom);
+            int fullBottom = r.Bottom + (PickerH - CurrentH), fullRight = r.Right + (PickerW - CurrentW);
+            var grid = Rectangle.FromLTRB(r.X, r.Y + hh + (int)(16 * s), fullRight, fullBottom);
             float cw = grid.Width / (float)perRow, ch = grid.Height / (float)rows;
-            int d = (int)Math.Min(cw - 16 * s, ch - 24 * s);
+            int d = (int)Math.Min(cw - 20 * s, ch - 30 * s);
             EnsureLookThumbs(d);
             for (int k = 0; k < all.Length; k++)
             {
@@ -609,11 +629,11 @@ namespace WispR
             {
                 if (!open) return;
                 expand = (float)Anim.Lerp(from, to, e);
-                screenRect.Height = CurrentH;
+                SizeToExpand();
                 Redraw();
             }, () =>
             {
-                if (!on) { recordsOpen = false; expand = 0; screenRect.Height = CurrentH; Redraw(); UpdateSpin(); }
+                if (!on) { recordsOpen = false; expand = 0; SizeToExpand(); Redraw(); UpdateSpin(); }
             }, on ? (Func<double, double>)Anim.OutCubic : Anim.InCubic);
         }
 
