@@ -586,7 +586,9 @@ namespace WispR
             if (members.Count == 0)
             {
                 Log.Throttled("we-props", "Wallpaper Engine: no saved settings found for " + folderName
-                    + (seenKeys.Count > 0 ? " (entries: " + string.Join(", ", seenKeys.Take(4)) + ")" : ""));
+                    + (seenKeys.Count > 0 ? " (entries: " + string.Join(", ", seenKeys.Take(4)) + ")" : "")
+                    + " — see wallpaper-engine-settings.txt next to this log");
+                WriteSettingsReport(d, text, projectJson, folderName);
                 return null;
             }
             var sb = new StringBuilder("{");
@@ -602,6 +604,47 @@ namespace WispR
             Log.Write("Wallpaper Engine: applying your " + members.Count + " saved settings for " + folderName);
             return json;
         }
+
+        /// <summary>
+        /// For finding where Wallpaper Engine keeps a wallpaper's settings: every place config.json mentions
+        /// that wallpaper's folder, with what's around it. Written next to WispR's log.
+        /// </summary>
+        static void WriteSettingsReport(string d, string text, string projectJson, string folderName)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("WispR — where Wallpaper Engine keeps a wallpaper's settings, " + DateTime.Now);
+                sb.AppendLine("Wallpaper: " + projectJson);
+                sb.AppendLine("Settings file: " + Path.Combine(d, "config.json") + " (" + text.Length + " characters)");
+                sb.AppendLine();
+                // the outline of the file: its keys, two levels deep
+                sb.AppendLine("Top-level layout:");
+                if (text.TrimStart().StartsWith("{"))
+                    foreach (var (k1, v1) in Members(text.Trim()))
+                    {
+                        sb.AppendLine("  " + k1 + (v1.StartsWith("{") ? "" : " = " + Short(v1, 60)));
+                        if (v1.StartsWith("{"))
+                            foreach (var (k2, v2) in Members(v1))
+                                sb.AppendLine("    " + k2 + (v2.StartsWith("{") ? "  { " + string.Join(", ", Members(v2).Select(x => x.Item1).Take(25)) + " }" : " = " + Short(v2, 60)));
+                    }
+                sb.AppendLine();
+                sb.AppendLine("Every mention of \"" + folderName + "\":");
+                int at = 0, n = 0;
+                while (folderName.Length > 0 && n < 20 && (at = text.IndexOf(folderName, at, StringComparison.OrdinalIgnoreCase)) >= 0)
+                {
+                    int from = Math.Max(0, at - 300), to = Math.Min(text.Length, at + folderName.Length + 700);
+                    sb.AppendLine("--- at " + at + " ---");
+                    sb.AppendLine(text.Substring(from, to - from));
+                    at += folderName.Length; n++;
+                }
+                if (n == 0) sb.AppendLine("  (none)");
+                File.WriteAllText(Path.Combine(Path.GetDirectoryName(Log.FilePath), "wallpaper-engine-settings.txt"), sb.ToString());
+            }
+            catch (Exception ex) { Log.Error("WallpaperEngine.WriteSettingsReport", ex); }
+        }
+
+        static string Short(string s, int max) { s = s.Replace("\r", " ").Replace("\n", " "); return s.Length > max ? s.Substring(0, max) + "…" : s; }
 
         // a quoted key ending in project.json, followed by ':'
         static readonly Regex PathKey = new Regex("\"((?:\\\\.|[^\"\\\\\\r\\n]){1,600}project\\.json)\"\\s*:",
