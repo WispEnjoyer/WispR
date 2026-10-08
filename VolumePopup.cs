@@ -44,7 +44,9 @@ namespace WispR
         Font badgeFont;
         const int MaxApps = 8;
         int AppRowH => S(46);
-        int MainY => above ? Height - baseH : 0;          // where the main part starts
+        int paintH;                                       // set while drawing a picture at another height
+        int H => paintH > 0 ? paintH : Height;
+        int MainY => above ? H - baseH : 0;               // where the main part starts
         int ListTop => above ? MainY - listFullH : baseH; // where the (full) mixer starts
 
         public event Action VolumeChanged;
@@ -62,7 +64,7 @@ namespace WispR
             DoubleBuffered = true;
             using (var g = CreateGraphics()) s = g.DpiX / 96f;
             watch.Tick += (o, e) => Watch();
-            refresh.Tick += (o, e) => { if (!dragging) { Read(); if (expanded && !Anim.IsRunning("volume-mixer")) ReadApps(); Invalidate(); } };
+            refresh.Tick += (o, e) => { if (!dragging) { Read(); if (expanded && !Anim.IsRunning("volume-mixer") && !GrowOut.IsMorphing(this)) ReadApps(); Invalidate(); } };
             wheel = new WheelHook(this, (delta, pt) =>
             {
                 int i = AppAt(PointToClient(pt));
@@ -126,6 +128,7 @@ namespace WispR
             wheel.Uninstall();
             dragging = false;
             Anim.Stop("volume-mixer");
+            expanded = false; // opens plain again next time
             if (Visible) GrowOut.Close(this, () => { Hide(); AppMixer.Release(); apps.Clear(); }); // sinks back into the bar
         }
 
@@ -185,6 +188,8 @@ namespace WispR
         /// <summary>Opens or closes the mixer part, or makes it fit a changed number of apps.</summary>
         void Grow(bool on, bool refit = false)
         {
+            if (above && Visible && GrowOut.IsMorphing(this)) GrowOut.EndMorph(this);
+            if (above && Visible && MorphTo(on, refit)) return;
             int fromPx = (int)Math.Round(listFullH * open);
             int toH = ListHeight(apps.Count);
             int toPx = on ? toH : 0;
@@ -205,6 +210,58 @@ namespace WispR
                 ApplySize();
                 if (!on) { AppMixer.Release(); apps.Clear(); shownCount = 0; }
             }, Anim.OutCubic);
+        }
+
+        /// <summary>
+        /// Out of a bottom bar: the size change is animated as one picture (popup and outline together), so
+        /// nothing comes apart while it moves. False when that isn't possible.
+        /// </summary>
+        bool MorphTo(bool on, bool refit)
+        {
+            int fromH = Height;
+            int toList = on ? ListHeight(apps.Count) : 0;
+            int toH = baseH + toList;
+            if (toH == fromH) { Finish(); return true; }
+            if (refit && toH < fromH) { Finish(); ApplySize(); return true; } // a row less: just fit
+
+            // the picture: the popup drawn at the larger height, mixer fully out
+            int bigH = Math.Max(fromH, toH);
+            listFullH = bigH - baseH;
+            open = 1;
+            Bitmap pic = null;
+            try { pic = Snapshot(bigH); }
+            catch (Exception ex) { Log.Error("VolumePopup.Snapshot", ex); }
+            if (pic == null || !GrowOut.Morph(this, pic, fromH, toH, refit ? 160 : 230, () => { Finish(); ApplySize(); pic.Dispose(); }))
+            {
+                pic?.Dispose();
+                listFullH = Math.Max(1, ListHeight(shownCount));
+                open = (fromH - baseH) / (float)listFullH;
+                return false;
+            }
+            return true;
+
+            void Finish()
+            {
+                shownCount = on ? apps.Count : 0;
+                listFullH = ListHeight(on ? apps.Count : 0);
+                open = on ? 1 : 0;
+                if (!on) { AppMixer.Release(); apps.Clear(); }
+            }
+        }
+
+        Bitmap Snapshot(int h)
+        {
+            var bmp = new Bitmap(w0, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            paintH = h;
+            try
+            {
+                Layout(h);
+                using var g = Graphics.FromImage(bmp);
+                g.Clear(BackColor);
+                PaintAll(g);
+            }
+            finally { paintH = 0; Layout(Height); }
+            return bmp;
         }
 
         void ApplySize()
@@ -243,9 +300,10 @@ namespace WispR
 
         // ---------- painting ----------
 
-        protected override void OnPaint(PaintEventArgs e)
+        protected override void OnPaint(PaintEventArgs e) => PaintAll(e.Graphics);
+
+        void PaintAll(Graphics g)
         {
-            var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
             // device name, mixer arrow, settings button
@@ -276,7 +334,7 @@ namespace WispR
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
             if (!SystemStatus.IsWindows11)
-                using (var pen = new Pen(T.Border)) g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+                using (var pen = new Pen(T.Border)) g.DrawRectangle(pen, 0, 0, Width - 1, H - 1);
         }
 
         void DrawSlider(Graphics g, Rectangle r, float v, bool off, bool hot, int knob)
@@ -295,7 +353,7 @@ namespace WispR
         void PaintMixer(Graphics g)
         {
             int m = S(16);
-            var area = above ? new Rectangle(0, 0, Width, MainY) : new Rectangle(0, baseH, Width, Height - baseH);
+            var area = above ? new Rectangle(0, 0, w0, MainY) : new Rectangle(0, baseH, w0, H - baseH);
             if (area.Height <= 0) return;
             var saved = g.Save();
             g.SetClip(area);

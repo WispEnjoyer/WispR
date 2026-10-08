@@ -92,7 +92,7 @@ namespace WispR
         /// </summary>
         public static Bitmap Build(Rectangle screenRect, Rectangle hole, int flare, int radius,
                                    Bitmap background, Point backgroundAt, Color fill, Color border, Bitmap holeContent = null,
-                                   bool floating = false, Rectangle? dockHole = null, float dockRadius = 0)
+                                   bool floating = false, Rectangle? dockHole = null, float dockRadius = 0, Rectangle? holeSource = null)
         {
             var bmp = new Bitmap(screenRect.Width, screenRect.Height, PixelFormat.Format32bppPArgb);
             using (var g = Graphics.FromImage(bmp))
@@ -120,7 +120,7 @@ namespace WispR
                 g.FillRectangle(clear, hole.X - screenRect.X, hole.Y - screenRect.Y, hole.Width, hole.Height);
                 if (holeContent != null)
                     g.DrawImage(holeContent, new Rectangle(hole.X - screenRect.X, hole.Y - screenRect.Y, hole.Width, hole.Height),
-                                new Rectangle(0, 0, holeContent.Width, holeContent.Height), GraphicsUnit.Pixel);
+                                holeSource ?? new Rectangle(0, 0, holeContent.Width, holeContent.Height), GraphicsUnit.Pixel);
                 if (dockHole is Rectangle dh) // under the taskbar: it draws itself there
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -168,6 +168,14 @@ namespace WispR
                 UpdateLayeredWindow(Handle, screen, ref dst, ref size, proxyDc, ref src, 0, ref blend, 2);
             }
             finally { ReleaseDC(IntPtr.Zero, screen); }
+            if (!Native.IsWindowVisible(Handle)) Native.ShowWindow(Handle, 4 /* SW_SHOWNOACTIVATE */);
+        }
+
+        /// <summary>Shows a finished picture (outline and popup together) at <paramref name="at"/>.</summary>
+        public void Present(Bitmap picture, Point at, byte alpha)
+        {
+            EndProxy();
+            Push(picture, at, alpha);
             if (!Native.IsWindowVisible(Handle)) Native.ShowWindow(Handle, 4 /* SW_SHOWNOACTIVATE */);
         }
 

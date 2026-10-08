@@ -23,7 +23,10 @@ namespace WispR
             public bool Hooked;
             public byte Alpha = 255;
             public bool Closing;
-            public bool Resizing;          // Resize() is moving it: the outline is redrawn once, afterwards
+            public bool Resizing;
+            public bool Morphing;          // Morph() is animating a size change as one picture; the popup is invisible
+            public Action MorphDone;
+            public double MorphOpacity = 1;          // Resize() is moving it: the outline is redrawn once, afterwards
             public bool Proxying;          // the outline window is showing the animation picture; the popup itself is invisible
             public double TargetOpacity = 1;
             public Rectangle ProxyFrame;   // where the full picture goes when fully out
@@ -68,8 +71,8 @@ namespace WispR
             {
                 st.Hooked = true;
                 f.VisibleChanged += (o, e) => { if (!f.Visible) Hide(f); };
-                f.LocationChanged += (o, e) => { if (f.Visible && !st.Proxying && !st.Resizing && !Anim.IsRunning(Key(f))) Render(f); };
-                f.SizeChanged += (o, e) => { if (f.Visible && !st.Proxying && !st.Resizing && !Anim.IsRunning(Key(f))) Render(f); };
+                f.LocationChanged += (o, e) => { if (f.Visible && !st.Proxying && !st.Resizing && !st.Morphing && !Anim.IsRunning(Key(f))) Render(f); };
+                f.SizeChanged += (o, e) => { if (f.Visible && !st.Proxying && !st.Resizing && !st.Morphing && !Anim.IsRunning(Key(f))) Render(f); };
                 f.Disposed += (o, e) => { if (states.TryGetValue(f, out var s2)) { s2.Shell?.Dispose(); s2.Bg?.Dispose(); states.Remove(f); } };
             }
 
@@ -165,6 +168,7 @@ namespace WispR
         {
             if (f.IsDisposed || !f.Visible || !states.TryGetValue(f, out var st) || st.Shell == null || st.Shell.IsDisposed || !st.Shell.Visible)
             { finish(); return; }
+            EndMorph(f);
             st.Closing = true;
             if (!st.Proxying)
             {
@@ -214,6 +218,60 @@ namespace WispR
             finally { st.Resizing = false; }
         }
 
+        /// <summary>
+        /// Animates an open popup getting taller or shorter (its bottom stays on the edge) as one picture in the
+        /// outline window, so the two never come apart. <paramref name="content"/> is the popup drawn at the
+        /// larger of the two heights; each frame shows its bottom rows. The popup itself is invisible meanwhile;
+        /// <paramref name="done"/> gives it its new size, then it shows again. False when it can't (then resize it yourself).
+        /// </summary>
+        public static bool Morph(Form f, Bitmap content, int fromH, int toH, int ms, Action done)
+        {
+            if (f.IsDisposed || !f.Visible || !states.TryGetValue(f, out var st) || st.Shell == null || st.Shell.IsDisposed
+                || !st.Shell.Visible || st.Proxying || st.Closing || st.Background != null) return false;
+            EndMorph(f);
+            int m = Inset(st.Radius), fl = st.Flare, w = f.Width, left = f.Left;
+            void FrameAt(int h)
+            {
+                h = Math.Max(1, Math.Min(content.Height, h));
+                var hole = new Rectangle(left, st.Edge - h, w, h);
+                var frame = new Rectangle(hole.X - m - fl, hole.Y - m, w + (m + fl) * 2, h + m);
+                using var pic = LauncherShell.Build(frame, hole, fl, st.Radius, null, Point.Empty, st.Theme.Background, st.Theme.Border, content,
+                                                    holeSource: new Rectangle(0, content.Height - h, Math.Min(w, content.Width), h));
+                st.Shell.Present(pic, frame.Location, st.Alpha);
+            }
+            try { FrameAt(fromH); }
+            catch (Exception ex) { Log.Error("GrowOut.Morph", ex); return false; }
+            st.Morphing = true;
+            st.MorphDone = done;
+            st.MorphOpacity = f.Opacity > 0.02 ? f.Opacity : st.TargetOpacity;
+            f.Opacity = 0; // the picture has taken over
+            Anim.Run(Key(f), ms, e =>
+            {
+                if (f.IsDisposed || !st.Morphing) return;
+                try { FrameAt((int)Math.Round(Anim.Lerp(fromH, toH, e))); } catch { }
+            }, () => EndMorph(f), Anim.OutCubic);
+            return true;
+        }
+
+        public static bool IsMorphing(Form f) => states.TryGetValue(f, out var st) && st.Morphing;
+
+        /// <summary>Ends a <see cref="Morph"/> now: the popup gets its new size and shows again.</summary>
+        public static void EndMorph(Form f)
+        {
+            if (!states.TryGetValue(f, out var st) || !st.Morphing) return;
+            Anim.Stop(Key(f));
+            st.Morphing = false;
+            var d = st.MorphDone; st.MorphDone = null;
+            if (f.IsDisposed) return;
+            st.Resizing = true;
+            try { d?.Invoke(); } catch (Exception ex) { Log.Error("GrowOut.EndMorph", ex); }
+            finally { st.Resizing = false; }
+            if (!f.Visible) { f.Opacity = st.MorphOpacity; return; }
+            Render(f);       // the outline at the new size (behind)…
+            f.Update();      // …the popup drawn…
+            f.Opacity = st.MorphOpacity; // …and shown
+        }
+
         static void Move(Form f, Rectangle b)
         {
             if (f.Bounds == b) return;
@@ -253,6 +311,7 @@ namespace WispR
 
         public static void Hide(Form f)
         {
+            if (states.TryGetValue(f, out var ms) && ms.Morphing) { ms.Morphing = false; ms.MorphDone = null; if (!f.IsDisposed) f.Opacity = ms.MorphOpacity; }
             Anim.Stop(Key(f));
             if (states.TryGetValue(f, out var ps) && ps.Proxying) { ps.Closing = false; FinishProxy(f, ps); }
             if (states.TryGetValue(f, out var st) && st.Shell != null && !st.Shell.IsDisposed && st.Shell.Visible) st.Shell.Hide();
