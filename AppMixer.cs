@@ -151,7 +151,7 @@ namespace WispR
             if (state == 2 /* expired */) { tally.Expired++; return false; }
             uint pid = 0; bool system = false;
             var iid2 = new Guid("bfb7ff88-7239-4fc9-8fa2-07c950be9c6d"); // IAudioSessionControl2: whose it is
-            var iidVol = new Guid("87CE5498-68D6-44E5-9215-6F24D2593233"); // ISimpleAudioVolume
+            var iidVol = new Guid("87CE5498-68D6-44E5-9215-6DA47EF883D8"); // ISimpleAudioVolume
             IntPtr vol = IntPtr.Zero;
             int hrC2 = Marshal.QueryInterface(control, ref iid2, out IntPtr c2), hrVol = 0, hrVol2 = 0;
             if (hrC2 == 0 && c2 != IntPtr.Zero)
@@ -336,7 +336,7 @@ namespace WispR
             return (T)d;
         }
 
-        [ComImport, Guid("87CE5498-68D6-44E5-9215-6F24D2593233"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        [ComImport, Guid("87CE5498-68D6-44E5-9215-6DA47EF883D8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         interface ISimpleAudioVolumeRcw
         {
             [PreserveSig] int SetMasterVolume(float level, ref Guid ctx);
