@@ -16,7 +16,7 @@ namespace WispR
         public float Level;
         public bool Muted, Active, IsSystem;
         public Bitmap Icon;                 // owned by the mixer (cached per program)
-        internal readonly List<object> Sessions = new List<object>(); // the COM objects, released on the next refresh
+        internal readonly List<IntPtr> Sessions = new List<IntPtr>(); // their volume controls, released on the next refresh
     }
 
     /// <summary>
@@ -41,42 +41,63 @@ namespace WispR
         public static bool Refresh()
         {
             var fresh = new List<MixerApp>();
-            IMMDeviceEnumerator en = null; IMMDevice dev = null; IAudioSessionManager2 mgr = null; IAudioSessionEnumerator list = null;
+            IntPtr en = IntPtr.Zero, dev = IntPtr.Zero, mgr = IntPtr.Zero, list = IntPtr.Zero;
+            string step = "create";
+            int hr = 0, count = -1, kept = 0;
             try
             {
-                en = (IMMDeviceEnumerator)new MMDeviceEnumerator();
-                if (en.GetDefaultAudioEndpoint(0 /* eRender */, 1 /* eMultimedia */, out dev) == 0 && dev != null)
+                // Talked to through the raw interfaces (no .NET COM wrappers in between), every step checked.
+                var clsid = new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
+                var iidEnum = new Guid("A95664D2-9614-4F35-A746-DE8DB63617E6");
+                hr = CoCreateInstance(ref clsid, IntPtr.Zero, 0x17, ref iidEnum, out en);
+                if (hr != 0 || en == IntPtr.Zero) return Done(fresh, step, hr, count, kept);
+                step = "default device";
+                hr = Fn<FnDefaultEndpoint>(en, 4)(en, 0 /* eRender */, 1 /* eMultimedia */, out dev);
+                if (hr != 0 || dev == IntPtr.Zero) return Done(fresh, step, hr, count, kept);
+                step = "session manager";
+                var iidMgr = new Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
+                hr = Fn<FnActivate>(dev, 3)(dev, ref iidMgr, 0x17, IntPtr.Zero, out mgr);
+                if (hr != 0 || mgr == IntPtr.Zero) return Done(fresh, step, hr, count, kept);
+                step = "session list";
+                hr = Fn<FnOutPtr>(mgr, 5)(mgr, out list);
+                if (hr != 0 || list == IntPtr.Zero) return Done(fresh, step, hr, count, kept);
+                step = "count";
+                hr = Fn<FnOutInt>(list, 3)(list, out count);
+                if (hr != 0) return Done(fresh, step, hr, count, kept);
+                step = "sessions";
+                var byKey = new Dictionary<string, MixerApp>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < count && i < 200; i++)
                 {
-                    var iid = typeof(IAudioSessionManager2).GUID;
-                    if (dev.Activate(ref iid, 0x17, IntPtr.Zero, out object o) == 0 && o is IAudioSessionManager2 m)
-                    {
-                        mgr = m;
-                        if (mgr.GetSessionEnumerator(out list) == 0 && list != null && list.GetCount(out int n) == 0)
-                        {
-                            var byKey = new Dictionary<string, MixerApp>(StringComparer.OrdinalIgnoreCase);
-                            for (int i = 0; i < n && i < 200; i++)
-                            {
-                                if (list.GetSession(i, out IAudioSessionControl2 s) != 0 || s == null) continue;
-                                bool keep = false;
-                                try { keep = Add(s, byKey, fresh); }
-                                catch { }
-                                finally { if (!keep) Marshal.ReleaseComObject(s); }
-                            }
-                        }
-                    }
+                    if (Fn<FnIndexOutPtr>(list, 4)(list, i, out IntPtr control) != 0 || control == IntPtr.Zero) continue;
+                    try { if (Add(control, byKey, fresh)) kept++; }
+                    catch (Exception ex) { if (!loggedError) { loggedError = true; Log.Error("AppMixer.Add", ex); } }
+                    finally { Marshal.Release(control); }
                 }
+                step = "done"; hr = 0;
             }
             catch (Exception ex)
             {
-                if (!loggedError) { loggedError = true; Log.Error("AppMixer.Refresh", ex); }
+                if (!loggedError) { loggedError = true; Log.Error("AppMixer.Refresh (" + step + ")", ex); }
             }
             finally
             {
-                if (list != null) Marshal.ReleaseComObject(list);
-                if (mgr != null) Marshal.ReleaseComObject(mgr);
-                if (dev != null) Marshal.ReleaseComObject(dev);
-                if (en != null) Marshal.ReleaseComObject(en);
+                if (list != IntPtr.Zero) Marshal.Release(list);
+                if (mgr != IntPtr.Zero) Marshal.Release(mgr);
+                if (dev != IntPtr.Zero) Marshal.Release(dev);
+                if (en != IntPtr.Zero) Marshal.Release(en);
             }
+            return Done(fresh, step, hr, count, kept);
+        }
+
+        static string lastReport;
+
+        static bool Done(List<MixerApp> fresh, string step, int hr, int count, int kept)
+        {
+            // for the log (once per different outcome): how far it got and what it found
+            string report = step == "done"
+                ? "Mixer: " + count + " sound sessions, " + kept + " usable, " + fresh.Count + " apps (" + string.Join(", ", fresh.Select(a => a.Name)) + ")."
+                : "Mixer: stopped at \"" + step + "\", error 0x" + hr.ToString("X8") + ".";
+            if (report != lastReport) { lastReport = report; Log.Write(report); }
 
             // playing ones first, then by name; Windows' own sounds last
             fresh = fresh.OrderBy(a => a.IsSystem).ThenByDescending(a => a.Active).ThenBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
@@ -87,30 +108,38 @@ namespace WispR
             return changed;
         }
 
-        /// <summary>Adds one session to its program's entry. True when the session object is kept.</summary>
-        static bool Add(IAudioSessionControl2 s, Dictionary<string, MixerApp> byKey, List<MixerApp> into)
+        /// <summary>Adds one session (an IAudioSessionControl) to its program's entry. True when it was used.</summary>
+        static bool Add(IntPtr control, Dictionary<string, MixerApp> byKey, List<MixerApp> into)
         {
-            if (s.GetState(out int state) != 0 || state == 2 /* expired */) return false;
-            if (!(s is ISimpleAudioVolume v)) return false;
-            s.GetProcessId(out uint pid);
-            bool system = s.IsSystemSoundsSession() == 0;
+            if (Fn<FnOutInt>(control, 3)(control, out int state) != 0 || state == 2 /* expired */) return false;
+            uint pid = 0; bool system = false;
+            var iid2 = new Guid("bfb7ff88-7239-4fc9-8fa2-07c950be9c6d"); // IAudioSessionControl2: whose it is
+            if (Marshal.QueryInterface(control, ref iid2, out IntPtr c2) == 0 && c2 != IntPtr.Zero)
+                try
+                {
+                    Fn<FnOutUInt>(c2, 14)(c2, out pid);
+                    system = Fn<FnNoArgs>(c2, 15)(c2) == 0; // S_OK: the system sounds session
+                }
+                finally { Marshal.Release(c2); }
             if (!system && pid == ownPid) return false; // WispR's own timer chime
+
+            var iidVol = new Guid("87CE5498-68D6-44E5-9215-6F24D2593233"); // ISimpleAudioVolume
+            if (Marshal.QueryInterface(control, ref iidVol, out IntPtr vol) != 0 || vol == IntPtr.Zero) return false;
+
             string path = system ? null : PathOf(pid);
             string key = system ? "|system" : path ?? ("pid:" + pid);
-
             if (!byKey.TryGetValue(key, out var app))
             {
                 app = new MixerApp { Key = key, Path = path, IsSystem = system };
-                app.Name = system ? "System sounds" : NameFor(path, DisplayName(s), pid);
+                app.Name = system ? "System sounds" : NameFor(path, DisplayName(control), pid);
                 app.Icon = IconFor(path);
-                v.GetMasterVolume(out app.Level);
-                v.GetMute(out bool muted);
-                app.Muted = muted;
+                if (Fn<FnOutFloat>(vol, 4)(vol, out float level) == 0) app.Level = level;
+                if (Fn<FnOutInt>(vol, 6)(vol, out int muted) == 0) app.Muted = muted != 0;
                 byKey[key] = app;
                 into.Add(app);
             }
             if (state == 1 /* active */) app.Active = true;
-            app.Sessions.Add(s);
+            app.Sessions.Add(vol); // kept (with its reference) until the next refresh
             return true;
         }
 
@@ -118,12 +147,11 @@ namespace WispR
         {
             level = Math.Max(0, Math.Min(1, level));
             app.Level = level;
-            foreach (var o in app.Sessions)
+            foreach (var v in app.Sessions)
                 try
                 {
-                    if (!(o is ISimpleAudioVolume v)) continue;
-                    v.SetMasterVolume(level, ref ctx);
-                    if (level > 0 && app.Muted) v.SetMute(false, ref ctx);
+                    Fn<FnSetFloat>(v, 3)(v, level, ref ctx);
+                    if (level > 0 && app.Muted) Fn<FnSetBool>(v, 5)(v, 0, ref ctx);
                 }
                 catch { }
             if (level > 0) app.Muted = false;
@@ -132,8 +160,8 @@ namespace WispR
         public static void SetMute(MixerApp app, bool mute)
         {
             app.Muted = mute;
-            foreach (var o in app.Sessions)
-                try { if (o is ISimpleAudioVolume v) v.SetMute(mute, ref ctx); } catch { }
+            foreach (var v in app.Sessions)
+                try { Fn<FnSetBool>(v, 5)(v, mute ? 1 : 0, ref ctx); } catch { }
         }
 
         /// <summary>Lets go of the session objects (when the mixer isn't shown).</summary>
@@ -145,15 +173,15 @@ namespace WispR
 
         static void ReleaseSessions(MixerApp a)
         {
-            foreach (var o in a.Sessions) try { Marshal.ReleaseComObject(o); } catch { }
+            foreach (var v in a.Sessions) try { Marshal.Release(v); } catch { }
             a.Sessions.Clear();
         }
 
         // ---------- names and icons ----------
 
-        static string DisplayName(IAudioSessionControl2 s)
+        static string DisplayName(IntPtr control)
         {
-            if (s.GetDisplayName(out IntPtr p) != 0 || p == IntPtr.Zero) return null;
+            if (Fn<FnOutPtr>(control, 4)(control, out IntPtr p) != 0 || p == IntPtr.Zero) return null;
             try
             {
                 string n = Marshal.PtrToStringUni(p);
@@ -215,67 +243,35 @@ namespace WispR
             return path;
         }
 
-        // ---------- Core Audio interfaces ----------
+        // ---------- Core Audio, called through the interfaces' function tables ----------
 
-        [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumerator { }
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnDefaultEndpoint(IntPtr self, int flow, int role, out IntPtr device);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnActivate(IntPtr self, ref Guid iid, int clsCtx, IntPtr p, out IntPtr iface);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnOutPtr(IntPtr self, out IntPtr value);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnOutInt(IntPtr self, out int value);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnOutUInt(IntPtr self, out uint value);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnOutFloat(IntPtr self, out float value);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnIndexOutPtr(IntPtr self, int index, out IntPtr value);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnNoArgs(IntPtr self);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnSetFloat(IntPtr self, float value, ref Guid ctx);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int FnSetBool(IntPtr self, int value, ref Guid ctx);
 
-        [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface IMMDeviceEnumerator
+        static readonly Dictionary<(IntPtr, Type), Delegate> fns = new Dictionary<(IntPtr, Type), Delegate>();
+
+        /// <summary>The function in slot <paramref name="slot"/> of the object's table.</summary>
+        static T Fn<T>(IntPtr obj, int slot) where T : Delegate
         {
-            [PreserveSig] int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr devices);
-            [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice device);
+            IntPtr table = Marshal.ReadIntPtr(obj);
+            IntPtr fn = Marshal.ReadIntPtr(table, slot * IntPtr.Size);
+            if (!fns.TryGetValue((fn, typeof(T)), out var d))
+            {
+                if (fns.Count > 200) fns.Clear();
+                fns[(fn, typeof(T))] = d = Marshal.GetDelegateForFunctionPointer(fn, typeof(T));
+            }
+            return (T)d;
         }
 
-        [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface IMMDevice
-        {
-            [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object iface);
-        }
-
-        [ComImport, Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface IAudioSessionManager2
-        {
-            [PreserveSig] int GetAudioSessionControl(IntPtr groupingParam, int flags, out IntPtr control);
-            [PreserveSig] int GetSimpleAudioVolume(IntPtr groupingParam, int flags, out IntPtr volume);
-            [PreserveSig] int GetSessionEnumerator(out IAudioSessionEnumerator list);
-        }
-
-        [ComImport, Guid("E2F5BB11-0570-40CA-ACDD-3AA01277DEE8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface IAudioSessionEnumerator
-        {
-            [PreserveSig] int GetCount(out int count);
-            [PreserveSig] int GetSession(int index, out IAudioSessionControl2 session);
-        }
-
-        [ComImport, Guid("bfb7ff88-7239-4fc9-8fa2-07c950be9c6d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface IAudioSessionControl2
-        {
-            // IAudioSessionControl
-            [PreserveSig] int GetState(out int state);
-            [PreserveSig] int GetDisplayName(out IntPtr name);
-            [PreserveSig] int SetDisplayName([MarshalAs(UnmanagedType.LPWStr)] string name, ref Guid ctx);
-            [PreserveSig] int GetIconPath(out IntPtr path);
-            [PreserveSig] int SetIconPath([MarshalAs(UnmanagedType.LPWStr)] string path, ref Guid ctx);
-            [PreserveSig] int GetGroupingParam(out Guid param);
-            [PreserveSig] int SetGroupingParam(ref Guid param, ref Guid ctx);
-            [PreserveSig] int RegisterAudioSessionNotification(IntPtr client);
-            [PreserveSig] int UnregisterAudioSessionNotification(IntPtr client);
-            // IAudioSessionControl2
-            [PreserveSig] int GetSessionIdentifier(out IntPtr id);
-            [PreserveSig] int GetSessionInstanceIdentifier(out IntPtr id);
-            [PreserveSig] int GetProcessId(out uint pid);
-            [PreserveSig] int IsSystemSoundsSession();
-        }
-
-        [ComImport, Guid("87CE5498-68D6-44E5-9215-6F24D2593233"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface ISimpleAudioVolume
-        {
-            [PreserveSig] int SetMasterVolume(float level, ref Guid ctx);
-            [PreserveSig] int GetMasterVolume(out float level);
-            [PreserveSig] int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid ctx);
-            [PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
-        }
-
+        [DllImport("ole32.dll")] static extern int CoCreateInstance(ref Guid clsid, IntPtr outer, int clsCtx, ref Guid iid, out IntPtr obj);
         [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
         [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr h, int flags, StringBuilder name, ref int size);
