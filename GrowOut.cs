@@ -23,10 +23,11 @@ namespace WispR
             public bool Hooked;
             public byte Alpha = 255;
             public bool Closing;
-            public bool Resizing;
+            public bool Resizing;          // Resize() is moving it: the outline is redrawn once, afterwards
             public bool Morphing;          // Morph() is animating a size change as one picture; the popup is invisible
+            public bool HoldOutline;       // the outline keeps showing the animation picture until the popup is drawn
             public Action MorphDone;
-            public double MorphOpacity = 1;          // Resize() is moving it: the outline is redrawn once, afterwards
+            public double MorphOpacity = 1;
             public bool Proxying;          // the outline window is showing the animation picture; the popup itself is invisible
             public double TargetOpacity = 1;
             public Rectangle ProxyFrame;   // where the full picture goes when fully out
@@ -34,6 +35,13 @@ namespace WispR
         }
 
         static readonly Dictionary<Form, State> states = new Dictionary<Form, State>();
+
+        /// <summary>
+        /// The popup's opacity when shown. Never quite 1: at exactly 1 Windows Forms turns the window from
+        /// layered back into a normal one, which redraws it from scratch and lets what's behind it show
+        /// through for a frame. Just under 1 it stays layered, keeps its picture, and looks the same.
+        /// </summary>
+        static double Shown(double o) => Math.Max(0.02, Math.Min(0.996, o));
 
         public static int Inset(int radius) => (int)Math.Ceiling(radius * 0.3) + 1;
 
@@ -108,9 +116,9 @@ namespace WispR
                 }, () =>
                 {
                     if (f.IsDisposed) return;
-                    FinishProxy(f, st);
-                    f.Update();   // the real popup is drawn…
-                    Render(f);    // …before the outline gives up the picture
+                    f.Update();          // the real popup is drawn (still invisible)…
+                    FinishProxy(f, st);  // …shown…
+                    Render(f);           // …and only then does the outline give up the picture
                 }, Anim.OutQuint);
             }));
         }
@@ -154,7 +162,7 @@ namespace WispR
         {
             st.Proxying = false;
             st.ProxyRows = 0;
-            if (!f.IsDisposed && Math.Abs(f.Opacity - st.TargetOpacity) > 0.001) f.Opacity = st.TargetOpacity;
+            if (!f.IsDisposed && Math.Abs(f.Opacity - Shown(st.TargetOpacity)) > 0.001) f.Opacity = Shown(st.TargetOpacity);
             st.Shell?.EndProxy();
         }
 
@@ -212,7 +220,7 @@ namespace WispR
             try
             {
                 // the outline first (it's behind and bigger), then the popup: no frame where they don't meet
-                RenderFor(f, st, bounds);
+                if (!st.HoldOutline) RenderFor(f, st, bounds);
                 Move(f, bounds);
             }
             finally { st.Resizing = false; }
@@ -263,13 +271,15 @@ namespace WispR
             st.Morphing = false;
             var d = st.MorphDone; st.MorphDone = null;
             if (f.IsDisposed) return;
-            st.Resizing = true;
+            // the popup gets its new size and is drawn while still invisible; the outline keeps showing the
+            // last animation frame (which looks the same) until the popup is back on top of it
+            st.HoldOutline = true;
             try { d?.Invoke(); } catch (Exception ex) { Log.Error("GrowOut.EndMorph", ex); }
-            finally { st.Resizing = false; }
-            if (!f.Visible) { f.Opacity = st.MorphOpacity; return; }
-            Render(f);       // the outline at the new size (behind)…
-            f.Update();      // …the popup drawn…
-            f.Opacity = st.MorphOpacity; // …and shown
+            finally { st.HoldOutline = false; }
+            if (!f.Visible) { f.Opacity = Shown(st.MorphOpacity); return; }
+            f.Update();
+            f.Opacity = Shown(st.MorphOpacity);
+            Render(f);
         }
 
         static void Move(Form f, Rectangle b)
@@ -311,7 +321,7 @@ namespace WispR
 
         public static void Hide(Form f)
         {
-            if (states.TryGetValue(f, out var ms) && ms.Morphing) { ms.Morphing = false; ms.MorphDone = null; if (!f.IsDisposed) f.Opacity = ms.MorphOpacity; }
+            if (states.TryGetValue(f, out var ms) && ms.Morphing) { ms.Morphing = false; ms.MorphDone = null; if (!f.IsDisposed) f.Opacity = Shown(ms.MorphOpacity); }
             Anim.Stop(Key(f));
             if (states.TryGetValue(f, out var ps) && ps.Proxying) { ps.Closing = false; FinishProxy(f, ps); }
             if (states.TryGetValue(f, out var st) && st.Shell != null && !st.Shell.IsDisposed && st.Shell.Visible) st.Shell.Hide();
