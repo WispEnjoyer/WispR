@@ -183,7 +183,7 @@ namespace WispR
                 }
                 // nothing playing: forget the cached cover — the UI disposes its copy, and handing that same
                 // (disposed) picture out again if the song comes back made every redraw fail
-                if (info == null) { lastThumbKey = null; lastThumb = null; }
+                if (info == null) { lastThumbKey = null; lastThumb = null; lastThumbHash = 0; }
                 try { Updated?.Invoke(info); } catch { }
 
                 // Commands are handled quickly, and a change event from the player (new length, seek, play/pause)
@@ -226,14 +226,30 @@ namespace WispR
                         info.Title = CallString(props, 6) ?? "";   // Title
                         info.Artist = CallString(props, 9) ?? "";  // Artist
                         if (info.Artist.Length == 0) info.Artist = CallString(props, 8) ?? ""; // AlbumArtist
-                        string thumbKey = info.Key;
-                        if (thumbKey != lastThumbKey)
+                        // The cover: players often switch the title first and the picture a moment later
+                        // (YouTube after a skip), so it's looked at again for the first seconds of a song
+                        // and now and then after that. It's only decoded again when its bytes changed.
+                        var now = DateTime.UtcNow;
+                        if (info.Key != lastThumbKey)
                         {
-                            lastThumbKey = thumbKey;
-                            lastThumb = null; // the media box disposes the old cover itself, once it has the new one
+                            lastThumbKey = info.Key;
+                            thumbCheckUntil = now.AddSeconds(10);
+                            nextThumbCheck = DateTime.MinValue;
+                        }
+                        if (now < thumbCheckUntil || now >= nextThumbCheck)
+                        {
+                            nextThumbCheck = now.AddSeconds(20);
                             IntPtr thumbRef = CallPtr(props, 15); // Thumbnail
+                            byte[] bytes = null;
                             if (thumbRef != IntPtr.Zero)
-                                try { lastThumb = ReadThumbnail(thumbRef); } finally { Marshal.Release(thumbRef); }
+                                try { bytes = ReadThumbnailBytes(thumbRef); } finally { Marshal.Release(thumbRef); }
+                            long hash = Fingerprint(bytes);
+                            if (hash != lastThumbHash)
+                            {
+                                lastThumbHash = hash;
+                                // a new picture object: the UI disposes the old one itself once it has this one
+                                lastThumb = bytes == null ? null : Decode(bytes);
+                            }
                         }
                         info.Thumbnail = lastThumb;
                     }
@@ -391,7 +407,30 @@ namespace WispR
 
         void DrainCommands() { while (commands.TryDequeue(out _)) { } }
 
-        static Bitmap ReadThumbnail(IntPtr streamRef)
+        long lastThumbHash;
+        DateTime thumbCheckUntil, nextThumbCheck;
+
+        static long Fingerprint(byte[] b)
+        {
+            if (b == null || b.Length == 0) return 0;
+            unchecked
+            {
+                long h = (long)14695981039346656037UL;
+                // the length and every 7th byte: enough to tell two covers apart, cheap for big ones
+                h = (h ^ b.Length) * 1099511628211L;
+                for (int i = 0; i < b.Length; i += 7) h = (h ^ b[i]) * 1099511628211L;
+                return h == 0 ? 1 : h;
+            }
+        }
+
+        static Bitmap Decode(byte[] bytes)
+        {
+            try { using var ms = new MemoryStream(bytes); return ImageLoad.FromStream(ms, 640); }
+            catch { return null; }
+        }
+
+        /// <summary>The cover picture's file bytes (at most 20 MB), or null.</summary>
+        static byte[] ReadThumbnailBytes(IntPtr streamRef)
         {
             IntPtr stream = Await(CallPtr(streamRef, 6)); // OpenReadAsync()
             if (stream == IntPtr.Zero) return null;
@@ -417,9 +456,7 @@ namespace WispR
                         }
                     }
                     finally { Marshal.FreeHGlobal(readPtr); }
-                    if (ms.Length == 0) return null;
-                    ms.Position = 0;
-                    return ImageLoad.FromStream(ms, 640);
+                    return ms.Length == 0 ? null : ms.ToArray();
                 }
                 finally { Marshal.ReleaseComObject(com); }
             }
