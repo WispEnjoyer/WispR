@@ -492,13 +492,16 @@ namespace WispR
         }
 
         /// <summary>Plays a wallpaper in Wallpaper Engine (starts it if needed).</summary>
-        public static bool Open(string projectJson)
+        public static bool Open(string projectJson, string preset = null)
         {
             // only ever hand Wallpaper Engine a project.json path (and nothing that could break out of the quotes)
             if (string.IsNullOrEmpty(projectJson) || projectJson.IndexOf('"') >= 0 ||
                 !projectJson.EndsWith("\\project.json", StringComparison.OrdinalIgnoreCase)) return false;
             var exe = Exe;
-            if (!Control("openWallpaper -file \"" + projectJson + "\"")) return false;
+            // your local preset for it (saved in Wallpaper Engine), if you named one in WispR's settings
+            preset = (preset ?? "").Trim();
+            bool withPreset = preset.Length > 0 && preset.Length <= 100 && preset.IndexOf('"') < 0 && !preset.Any(char.IsControl);
+            if (!Control("openWallpaper -file \"" + projectJson + "\"" + (withPreset ? " -preset \"" + preset + "\"" : ""))) return false;
             // Treat it as current straight away; Wallpaper Engine rewrites config.json a moment later and
             // the next read picks that up.
             lock (gate)
@@ -507,7 +510,7 @@ namespace WispR
                 try { configStamp = File.GetLastWriteTimeUtc(Path.Combine(Path.GetDirectoryName(exe), "config.json")); } catch { }
             }
             runningCheckedAt = DateTime.MinValue;
-            Log.Write("Wallpaper Engine: opened " + projectJson);
+            Log.Write("Wallpaper Engine: opened " + projectJson + (withPreset ? " with your preset \"" + preset + "\"" : ""));
             return true;
         }
     }

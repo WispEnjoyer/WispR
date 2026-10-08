@@ -462,12 +462,17 @@ namespace WispR
                 if (dlg.ShowDialog(this) == DialogResult.OK) { st.WallpaperFolder = dlg.SelectedPath; ShowFolder(); Changed(); }
             });
             var auto = FlatButton("Automatic", () => { st.WallpaperFolder = ""; ShowFolder(); Changed(); });
+            var presetBox = new TextBox { Width = S(180), BorderStyle = BorderStyle.FixedSingle, Font = rowFont };
+            presetBox.TextChanged += (o, e) => { if (!loading) { st.WallpaperPreset = presetBox.Text; Changed(); } };
+            loaders.Add(() => presetBox.Text = st.WallpaperPreset);
+            stylers.Add(t => { presetBox.BackColor = InputBack(t); presetBox.ForeColor = t.Text; });
             AddCard(page,
                 Row("Show", "What the carousel lists when you type \"wallpaper\"",
                     Choice(new[] { "Favorites", "Engine", "All" },
                         new[] { "Favourites (♥)", "All Wallpaper Engine wallpapers", "Wallpaper Engine + pictures" },
                         () => st.WallpaperSource, v => st.WallpaperSource = v, 250)),
-                Row("Pictures folder", "Your own wallpaper pictures", Group(folder, pick, auto)));
+                Row("Pictures folder", "Your own wallpaper pictures", Group(folder, pick, auto)),
+                Row("Wallpaper Engine preset", "The name of a local preset you saved in Wallpaper Engine; loaded with the wallpaper (empty: its own settings)", presetBox));
             var tip = new Label
             {
                 Text = "Tip: type \"wallpaper all\" to see everything, then right-click a wallpaper (or Ctrl+F) to ♥ it.",
