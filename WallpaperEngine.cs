@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
@@ -509,129 +508,7 @@ namespace WispR
             }
             runningCheckedAt = DateTime.MinValue;
             Log.Write("Wallpaper Engine: opened " + projectJson);
-            ReapplySavedProperties(projectJson);
             return true;
-        }
-
-        // ---------- your settings for a wallpaper ----------
-
-        /// <summary>
-        /// Opening a wallpaper by command starts it with its default settings, so what you changed in
-        /// Wallpaper Engine (date off, music volume 0…) is read from its config.json and applied once
-        /// the wallpaper has loaded — twice, in case it took a while.
-        /// </summary>
-        static void ReapplySavedProperties(string projectJson)
-        {
-            string props;
-            try { props = SavedProperties(projectJson); }
-            catch (Exception ex) { Log.Error("WallpaperEngine.SavedProperties", ex); return; }
-            if (props == null) return;
-            foreach (int delay in new[] { 1200, 4000 })
-                System.Threading.Tasks.Task.Delay(delay).ContinueWith(_ =>
-                {
-                    try
-                    {
-                        // still the one showing (you may have picked another meanwhile)
-                        lock (gate) if (!string.Equals(currentJson, Path.GetFullPath(projectJson), StringComparison.OrdinalIgnoreCase)) return;
-                        Control("applyProperties -properties RAW~(" + props + ")~END");
-                    }
-                    catch { }
-                });
-        }
-
-        /// <summary>
-        /// Your saved settings for the wallpaper, as the JSON object applyProperties takes ({"name":value,…}),
-        /// or null. Wallpaper Engine keeps them in config.json under the wallpaper's project.json path; the
-        /// layout isn't documented, so any object stored under that path is accepted, and settings stored as
-        /// {"value": …} are unwrapped.
-        /// </summary>
-        static string SavedProperties(string projectJson)
-        {
-            var d = Folder;
-            if (d == null) return null;
-            string config = Path.Combine(d, "config.json"), text;
-            try { if (new FileInfo(config).Length > 20 * 1024 * 1024) return null; text = File.ReadAllText(config); } catch { return null; }
-
-            string want = Norm(projectJson);
-            string folderName = Path.GetFileName(Path.GetDirectoryName(projectJson) ?? "");
-            var members = new Dictionary<string, string>(StringComparer.Ordinal);
-            var seenKeys = new List<string>();
-            MatchCollection keys;
-            try { keys = PathKey.Matches(text); _ = keys.Count; } catch (RegexMatchTimeoutException) { return null; }
-            foreach (Match k in keys)
-            {
-                string key;
-                try { key = Regex.Unescape(k.Groups[1].Value); } catch { key = k.Groups[1].Value; }
-                string nk = Norm(key);
-                if (nk != want && !(folderName.Length > 0 && nk.EndsWith("\\" + folderName.ToLowerInvariant() + "\\project.json"))) continue;
-                seenKeys.Add(key);
-                string obj = ValueAt(text, k.Index + k.Length);
-                if (obj == null || !obj.StartsWith("{")) continue;
-                foreach (var (name, raw) in Members(obj))
-                {
-                    if (name == "file") { members.Clear(); break; } // a monitor's "what's playing" entry, not settings
-                    string value = raw;
-                    if (raw.StartsWith("{"))
-                    {
-                        // {"value": …} (maybe with a type next to it): the value
-                        string inner = null;
-                        foreach (var (n2, r2) in Members(raw)) if (n2 == "value") inner = r2;
-                        if (inner == null) continue;
-                        value = inner;
-                    }
-                    if (value.StartsWith("[") || value.StartsWith("{")) continue;
-                    members[name] = value;
-                }
-            }
-            if (members.Count == 0)
-            {
-                Log.Throttled("we-props", "Wallpaper Engine: no saved settings found for " + folderName
-                    + (seenKeys.Count > 0 ? " (entries: " + string.Join(", ", seenKeys.Take(4)) + ")" : ""));
-                return null;
-            }
-            var sb = new StringBuilder("{");
-            foreach (var m in members)
-            {
-                if (sb.Length > 1) sb.Append(',');
-                sb.Append('"').Append(m.Key.Replace("\\", "\\\\").Replace("\"", "\\\"")).Append("\":").Append(m.Value);
-            }
-            sb.Append('}');
-            string json = sb.ToString().Replace("\r", " ").Replace("\n", " ");
-            // nothing that could end the RAW~( … )~END wrapper early or go past a command line's size
-            if (json.Contains(")~END") || json.Length > 16000) return null;
-            Log.Write("Wallpaper Engine: applying your " + members.Count + " saved settings for " + folderName);
-            return json;
-        }
-
-        // a quoted key ending in project.json, followed by ':'
-        static readonly Regex PathKey = new Regex("\"((?:\\\\.|[^\"\\\\\\r\\n]){1,600}project\\.json)\"\\s*:",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(500));
-
-        static string Norm(string p) => (p ?? "").Replace('/', '\\').Replace("\\\\", "\\").Trim().ToLowerInvariant();
-
-        /// <summary>The top-level members of a JSON object as (name, raw value text).</summary>
-        static IEnumerable<(string, string)> Members(string obj)
-        {
-            int i = 1;
-            while (i < obj.Length)
-            {
-                while (i < obj.Length && (char.IsWhiteSpace(obj[i]) || obj[i] == ',')) i++;
-                if (i >= obj.Length || obj[i] == '}') yield break;
-                if (obj[i] != '"') yield break;
-                string nameRaw = ValueAt(obj, i);
-                if (nameRaw == null) yield break;
-                i += nameRaw.Length;
-                while (i < obj.Length && char.IsWhiteSpace(obj[i])) i++;
-                if (i >= obj.Length || obj[i] != ':') yield break;
-                i++;
-                string val = ValueAt(obj, i);
-                if (val == null) yield break;
-                while (i < obj.Length && char.IsWhiteSpace(obj[i])) i++;
-                i += val.Length;
-                string name;
-                try { name = Regex.Unescape(nameRaw.Substring(1, nameRaw.Length - 2)); } catch { name = nameRaw.Trim('"'); }
-                yield return (name, val.Trim());
-            }
         }
     }
 }
