@@ -30,6 +30,9 @@ namespace WispR
         // ---- geometry ----
         int PanelW => (int)(780 * s);
         int PanelH => (int)(300 * s);
+        int PickerH => (int)(470 * s);                       // taller while the record looks picker is open
+        float expand;                                        // 0 = normal height, 1 = picker height
+        int CurrentH => (int)Math.Round(PanelH + (PickerH - PanelH) * expand);
         int Flare => Ui.CornerPx(s);
         int Radius => Ui.CornerPx(s);
         int TabH => (int)(58 * s);
@@ -199,7 +202,8 @@ namespace WispR
             openDevice = scr.DeviceName;
             if (notches.TryGetValue(scr.DeviceName, out var nn)) nn.Conceal(); // the panel takes over from the notch
             int w = PanelW + Flare * 2;
-            screenRect = new Rectangle(scr.Bounds.X + (scr.Bounds.Width - w) / 2, edge, w, PanelH);
+            expand = 0;
+            screenRect = new Rectangle(scr.Bounds.X + (scr.Bounds.Width - w) / 2, edge, w, CurrentH);
             open = true; closing = false; outsideSince = DateTime.MinValue;
             switch (settings.TopPanelTab)
             {
@@ -234,6 +238,8 @@ namespace WispR
                 media.Paused = true;
                 ReleaseBitmap();
                 recordsOpen = false;
+                expand = 0;
+                Anim.Stop("top-panel-picker");
                 foreach (var b in lookThumbs.Values) b.Dispose();
                 lookThumbs.Clear(); lookThumbsKey = null;
             }
@@ -358,7 +364,7 @@ namespace WispR
         {
             if (!open) return;
             int w = screenRect.Width, h = screenRect.Height;
-            if (!EnsureDib(w, h)) return;
+            if (!EnsureDib(w, Math.Max(h, PickerH))) return;
             if (full || layersDirty || under == null) RenderLayers(w, h);
             using (var g = Graphics.FromImage(dibBmp))
             {
@@ -383,11 +389,12 @@ namespace WispR
         {
             layersDirty = false;
             buttons.Clear();
-            if (under == null || under.Width != w || under.Height != h)
+            int hAlloc = Math.Max(h, PickerH); // big enough for the picker: growing doesn't reallocate per frame
+            if (under == null || under.Width != w || under.Height != hAlloc)
             {
                 under?.Dispose(); over?.Dispose();
-                under = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
-                over = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
+                under = new Bitmap(w, hAlloc, PixelFormat.Format32bppPArgb);
+                over = new Bitmap(w, hAlloc, PixelFormat.Format32bppPArgb);
             }
             shape?.Dispose();
             // the outline: flares into the top edge, rounded bottom corners
@@ -462,7 +469,7 @@ namespace WispR
             IntPtr screenDc = GetDC(IntPtr.Zero);
             try
             {
-                var size = new SIZE { cx = dibBmp.Width, cy = dibBmp.Height };
+                var size = new SIZE { cx = dibBmp.Width, cy = Math.Min(dibBmp.Height, screenRect.Height) }; // only the panel's current height
                 var src = new POINT();
                 var dst = new POINT { x = pos.X, y = pos.Y };
                 byte alpha = (byte)Math.Max(0, Math.Min(255, settings.Opacity * 255 / 100));
@@ -499,7 +506,7 @@ namespace WispR
                     g.FillPath(b, p);
                 }
                 int idx = i;
-                buttons.Add((cell, () => { tab = idx; tabChosen = true; recordsOpen = false; Redraw(); UpdateSpin(); }));
+                buttons.Add((cell, () => { tab = idx; tabChosen = true; if (recordsOpen) ShowPicker(false); Redraw(); UpdateSpin(); }));
             }
             using var line = new Pen(Color.FromArgb(60, T.Text));
             g.DrawLine(line, r.X, r.Bottom, r.Right, r.Bottom);
@@ -512,7 +519,7 @@ namespace WispR
                 bool hot = ir.Contains(mouse);
                 if (hot || recordsOpen) using (var b = new SolidBrush(Color.FromArgb(recordsOpen ? 70 : 40, T.Accent))) g.FillEllipse(b, ir);
                 DrawText(g, "\uE790", tabGlyphFont, ir, recordsOpen || hot ? T.Accent : T.SubText); // palette
-                buttons.Insert(0, (ir, () => { recordsOpen = !recordsOpen; Redraw(); UpdateSpin(); }));
+                buttons.Insert(0, (ir, () => ShowPicker(!recordsOpen)));
             }
         }
 
@@ -520,7 +527,7 @@ namespace WispR
         bool recordsOpen;
         readonly Dictionary<Vinyl.Style, Bitmap> lookThumbs = new Dictionary<Vinyl.Style, Bitmap>();
         string lookThumbsKey;
-        static readonly Font lookFont = new Font("Segoe UI", 7.5f);
+        static readonly Font lookFont = new Font("Segoe UI", 8.5f);
 
         /// <summary>All record looks in the song's colours; click one to keep it out of the per-song mix (or let it back in).</summary>
         void DrawRecords(Graphics g, Rectangle r)
@@ -533,7 +540,7 @@ namespace WispR
             var back = new Rectangle(r.X, r.Y, (int)(26 * s), hh);
             if (back.Contains(mouse)) using (var b = new SolidBrush(Color.FromArgb(40, T.Accent))) g.FillEllipse(b, back);
             DrawText(g, "\uE72B", tabGlyphFont, back, T.Text); // back arrow
-            buttons.Add((back, () => { recordsOpen = false; Redraw(); UpdateSpin(); }));
+            buttons.Add((back, () => ShowPicker(false)));
             DrawText(g, "Record looks", titleFont, new Rectangle(back.Right + (int)(6 * s), r.Y - (int)(2 * s), (int)(200 * s), hh), T.Text, left: true);
             string note = Vinyl.Fixed.HasValue ? "Settings pick one look for every song right now"
                         : hiddenCount == 0 ? "Click a record to keep it out of the mix" : (all.Length - hiddenCount) + " of " + all.Length + " in the mix · click to switch one off or on";
@@ -547,11 +554,12 @@ namespace WispR
                 buttons.Insert(0, (allR, () => { settings.VinylHidden.Clear(); settings.NotifyChanged(); Redraw(); }));
             }
 
-            // the grid: two rows of twelve
-            int perRow = (all.Length + 1) / 2, rows = 2;
-            var grid = Rectangle.FromLTRB(r.X, r.Y + hh + (int)(8 * s), r.Right, r.Bottom);
+            // the grid: three rows of eight, laid out for the picker's full height (it shows as the panel grows)
+            int perRow = 8, rows = (all.Length + perRow - 1) / perRow;
+            int fullBottom = r.Bottom + (PickerH - CurrentH);
+            var grid = Rectangle.FromLTRB(r.X, r.Y + hh + (int)(12 * s), r.Right, fullBottom);
             float cw = grid.Width / (float)perRow, ch = grid.Height / (float)rows;
-            int d = (int)Math.Min(cw - 8 * s, ch - 18 * s);
+            int d = (int)Math.Min(cw - 16 * s, ch - 24 * s);
             EnsureLookThumbs(d);
             for (int k = 0; k < all.Length; k++)
             {
@@ -586,10 +594,27 @@ namespace WispR
                         g.DrawLine(pen, mark.Right - q, mark.Y + q, mark.X + q, mark.Bottom - q);
                     }
                 }
-                DrawText(g, look.ToString(), lookFont, new Rectangle(cell.X, discR.Bottom + (int)(2 * s), cell.Width, (int)(14 * s)), off ? Color.FromArgb(130, T.SubText) : T.SubText);
+                DrawText(g, look.ToString(), lookFont, new Rectangle(cell.X, discR.Bottom + (int)(3 * s), cell.Width, (int)(16 * s)), off ? Color.FromArgb(130, T.SubText) : T.SubText);
                 var lk = look;
                 buttons.Add((cell, () => ToggleLook(lk)));
             }
+        }
+
+        /// <summary>Opens or closes the picker: the panel grows taller for it, and shrinks back to the player.</summary>
+        void ShowPicker(bool on)
+        {
+            if (on) recordsOpen = true; // the picker shows while it grows; closing keeps it until shrunk
+            float from = expand, to = on ? 1 : 0;
+            Anim.Run("top-panel-picker", 240, e =>
+            {
+                if (!open) return;
+                expand = (float)Anim.Lerp(from, to, e);
+                screenRect.Height = CurrentH;
+                Redraw();
+            }, () =>
+            {
+                if (!on) { recordsOpen = false; expand = 0; screenRect.Height = CurrentH; Redraw(); UpdateSpin(); }
+            }, on ? (Func<double, double>)Anim.OutCubic : Anim.InCubic);
         }
 
         void ToggleLook(Vinyl.Style look)
