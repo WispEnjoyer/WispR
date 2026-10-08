@@ -233,6 +233,9 @@ namespace WispR
                 Hide();
                 media.Paused = true;
                 ReleaseBitmap();
+                recordsOpen = false;
+                foreach (var b in lookThumbs.Values) b.Dispose();
+                lookThumbs.Clear(); lookThumbsKey = null;
             }
             if (now) { Anim.Stop(this); Done(); return; }
             float from = slide;
@@ -362,7 +365,7 @@ namespace WispR
                 g.CompositingMode = CompositingMode.SourceCopy;
                 g.DrawImageUnscaled(under, 0, 0);
                 g.CompositingMode = CompositingMode.SourceOver;
-                if (tab == 0 && info != null)
+                if (tab == 0 && info != null && !recordsOpen)
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.PixelOffsetMode = PixelOffsetMode.HighQuality;
@@ -402,12 +405,14 @@ namespace WispR
                 using (var pen = new Pen(Color.FromArgb(90, T.Border))) g.DrawPath(pen, shape);
                 g.SetClip(shape);
                 DrawTabs(g, new Rectangle(body.X + (int)(24 * s), (int)(6 * s), body.Width - (int)(48 * s), TabH));
-                if (tab == 0) DrawMedia(g, content, 0); else DrawPerformance(g, content);
+                if (tab == 0 && recordsOpen) DrawRecords(g, content);
+                else if (tab == 0) DrawMedia(g, content, 0);
+                else DrawPerformance(g, content);
             }
             using (var g = NewGraphics(over))
             {
                 g.SetClip(shape);
-                if (tab == 0) DrawMedia(g, content, 2);
+                if (tab == 0 && !recordsOpen) DrawMedia(g, content, 2);
             }
         }
 
@@ -494,10 +499,123 @@ namespace WispR
                     g.FillPath(b, p);
                 }
                 int idx = i;
-                buttons.Add((cell, () => { tab = idx; tabChosen = true; Redraw(); UpdateSpin(); }));
+                buttons.Add((cell, () => { tab = idx; tabChosen = true; recordsOpen = false; Redraw(); UpdateSpin(); }));
             }
             using var line = new Pen(Color.FromArgb(60, T.Text));
             g.DrawLine(line, r.X, r.Bottom, r.Right, r.Bottom);
+
+            // the record looks picker: a small icon at the end of the tab row, on the Media tab
+            if (tab == 0)
+            {
+                int bs = (int)(30 * s);
+                var ir = new Rectangle(r.Right - bs, r.Y + (r.Height - bs) / 2 - (int)(2 * s), bs, bs);
+                bool hot = ir.Contains(mouse);
+                if (hot || recordsOpen) using (var b = new SolidBrush(Color.FromArgb(recordsOpen ? 70 : 40, T.Accent))) g.FillEllipse(b, ir);
+                DrawText(g, "\uE790", tabGlyphFont, ir, recordsOpen || hot ? T.Accent : T.SubText); // palette
+                buttons.Insert(0, (ir, () => { recordsOpen = !recordsOpen; Redraw(); UpdateSpin(); }));
+            }
+        }
+
+        // ---- the record looks picker ----
+        bool recordsOpen;
+        readonly Dictionary<Vinyl.Style, Bitmap> lookThumbs = new Dictionary<Vinyl.Style, Bitmap>();
+        string lookThumbsKey;
+        static readonly Font lookFont = new Font("Segoe UI", 7.5f);
+
+        /// <summary>All record looks in the song's colours; click one to keep it out of the per-song mix (or let it back in).</summary>
+        void DrawRecords(Graphics g, Rectangle r)
+        {
+            var all = (Vinyl.Style[])Enum.GetValues(typeof(Vinyl.Style));
+            int hiddenCount = all.Count(a => Vinyl.Hidden.Contains(a));
+
+            // header: back, what this is, and "show all"
+            int hh = (int)(26 * s);
+            var back = new Rectangle(r.X, r.Y, (int)(26 * s), hh);
+            if (back.Contains(mouse)) using (var b = new SolidBrush(Color.FromArgb(40, T.Accent))) g.FillEllipse(b, back);
+            DrawText(g, "\uE72B", tabGlyphFont, back, T.Text); // back arrow
+            buttons.Add((back, () => { recordsOpen = false; Redraw(); UpdateSpin(); }));
+            DrawText(g, "Record looks", titleFont, new Rectangle(back.Right + (int)(6 * s), r.Y - (int)(2 * s), (int)(200 * s), hh), T.Text, left: true);
+            string note = Vinyl.Fixed.HasValue ? "Settings pick one look for every song right now"
+                        : hiddenCount == 0 ? "Click a record to keep it out of the mix" : (all.Length - hiddenCount) + " of " + all.Length + " in the mix · click to switch one off or on";
+            DrawText(g, note, smallFont, new Rectangle(back.Right + (int)(160 * s), r.Y, r.Width - (int)(300 * s), hh), T.SubText, left: true);
+            if (hiddenCount > 0)
+            {
+                var allR = new Rectangle(r.Right - (int)(80 * s), r.Y + (int)(2 * s), (int)(80 * s), hh - (int)(4 * s));
+                bool hot = allR.Contains(mouse);
+                using (var p = Ui.Round(allR, allR.Height / 2f)) using (var b = new SolidBrush(Color.FromArgb(hot ? 80 : 45, T.Accent))) g.FillPath(b, p);
+                DrawText(g, "Show all", smallFont, allR, hot ? T.Text : Ui.Mix(T.Accent, T.Text, 0.35f));
+                buttons.Insert(0, (allR, () => { settings.VinylHidden.Clear(); settings.NotifyChanged(); Redraw(); }));
+            }
+
+            // the grid: two rows of twelve
+            int perRow = (all.Length + 1) / 2, rows = 2;
+            var grid = Rectangle.FromLTRB(r.X, r.Y + hh + (int)(8 * s), r.Right, r.Bottom);
+            float cw = grid.Width / (float)perRow, ch = grid.Height / (float)rows;
+            int d = (int)Math.Min(cw - 8 * s, ch - 18 * s);
+            EnsureLookThumbs(d);
+            for (int k = 0; k < all.Length; k++)
+            {
+                var look = all[k];
+                bool off = Vinyl.Hidden.Contains(look);
+                var cell = new Rectangle((int)(grid.X + (k % perRow) * cw), (int)(grid.Y + (k / perRow) * ch), (int)cw, (int)ch);
+                var discR = new Rectangle(cell.X + (cell.Width - d) / 2, cell.Y, d, d);
+                bool hot = cell.Contains(mouse);
+                if (lookThumbs.TryGetValue(look, out var thumb))
+                {
+                    if (off)
+                    {
+                        using var ia = new ImageAttributes();
+                        ia.SetColorMatrix(new ColorMatrix(new[]
+                        {   // switched off: faded and grey
+                            new[] { .21f, .21f, .21f, 0, 0 }, new[] { .55f, .55f, .55f, 0, 0 }, new[] { .07f, .07f, .07f, 0, 0 },
+                            new[] { 0f, 0, 0, 0.35f, 0 }, new[] { 0f, 0, 0, 0, 1 },
+                        }));
+                        g.DrawImage(thumb, discR, 0, 0, thumb.Width, thumb.Height, GraphicsUnit.Pixel, ia);
+                    }
+                    else g.DrawImage(thumb, discR);
+                }
+                if (hot) using (var pen = new Pen(T.Accent, 2 * s)) g.DrawEllipse(pen, Rectangle.Inflate(discR, (int)(2 * s), (int)(2 * s)));
+                if (off) // a small "off" mark
+                {
+                    var mark = new RectangleF(discR.Right - 12 * s, discR.Y, 13 * s, 13 * s);
+                    using (var b = new SolidBrush(T.Background)) g.FillEllipse(b, mark);
+                    using (var pen = new Pen(T.SubText, 1.6f * s))
+                    {
+                        float q = 3.5f * s;
+                        g.DrawLine(pen, mark.X + q, mark.Y + q, mark.Right - q, mark.Bottom - q);
+                        g.DrawLine(pen, mark.Right - q, mark.Y + q, mark.X + q, mark.Bottom - q);
+                    }
+                }
+                DrawText(g, look.ToString(), lookFont, new Rectangle(cell.X, discR.Bottom + (int)(2 * s), cell.Width, (int)(14 * s)), off ? Color.FromArgb(130, T.SubText) : T.SubText);
+                var lk = look;
+                buttons.Add((cell, () => ToggleLook(lk)));
+            }
+        }
+
+        void ToggleLook(Vinyl.Style look)
+        {
+            string name = look.ToString();
+            if (settings.VinylHidden.Contains(name)) settings.VinylHidden.Remove(name);
+            else
+            {
+                int total = Enum.GetValues(typeof(Vinyl.Style)).Length;
+                if (settings.VinylHidden.Count >= total - 1) return; // at least one look has to stay
+                settings.VinylHidden.Add(name);
+            }
+            settings.NotifyChanged(); // saved; the playing song gets a new record if its look was switched off
+            Redraw();
+        }
+
+        /// <summary>Small previews of every look in the playing song's colours (made once per song and size).</summary>
+        void EnsureLookThumbs(int d)
+        {
+            string key = (info?.Key ?? "") + "|" + d + "|" + (info?.Thumbnail?.GetHashCode() ?? 0);
+            if (key == lookThumbsKey) return;
+            lookThumbsKey = key;
+            foreach (var b in lookThumbs.Values) b.Dispose();
+            lookThumbs.Clear();
+            foreach (Vinyl.Style look in Enum.GetValues(typeof(Vinyl.Style)))
+                try { lookThumbs[look] = Vinyl.Render(info?.Thumbnail, "preview", Math.Max(16, d), look); } catch { }
         }
 
         // ---- Media ----
@@ -708,7 +826,7 @@ namespace WispR
 
         void EnsureVinyl(MediaInfo i, int size)
         {
-            string key = i.Key + "|" + size + "|" + (i.Thumbnail?.GetHashCode() ?? 0) + "|" + Vinyl.Fixed;
+            string key = i.Key + "|" + size + "|" + (i.Thumbnail?.GetHashCode() ?? 0) + "|" + Vinyl.ChoiceKey;
             if (key == vinylKey) return;
             vinylKey = key;
             vinyl?.Dispose();
@@ -727,7 +845,7 @@ namespace WispR
         /// </summary>
         bool SpinFrame()
         {
-            if (!open || tab != 0 || info == null) return false;
+            if (!open || tab != 0 || info == null || recordsOpen) return false;
             var now = DateTime.Now;
             if ((now - lastSpin).TotalMilliseconds < 15) return true; // faster screens: skip every other frame
             float dt = (float)Math.Min(0.1, (now - lastSpin).TotalSeconds);
@@ -747,7 +865,7 @@ namespace WispR
 
         void UpdateSpin()
         {
-            if (open && tab == 0 && info != null && !Anim.FramesRunning(SpinKey)) { lastSpin = DateTime.Now; Anim.Frames(SpinKey, SpinFrame); }
+            if (open && tab == 0 && info != null && !recordsOpen && !Anim.FramesRunning(SpinKey)) { lastSpin = DateTime.Now; Anim.Frames(SpinKey, SpinFrame); }
         }
 
         // ---- Performance ----

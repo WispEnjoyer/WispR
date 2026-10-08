@@ -130,6 +130,7 @@ namespace WispR
 
         public List<string> Pinned = new List<string>();        // pinned inside the launcher
         public List<string> WallpaperHearts = new List<string>(); // wallpapers ♥'d in WispR's picker (project.json paths)
+        public List<string> VinylHidden = new List<string>();     // record looks never to pick for a song
         public List<string> TaskbarPinned = new List<string>(); // pinned on the taskbar (app keys or "exe:<path>")
 
         public event Action Changed;
@@ -174,6 +175,7 @@ namespace WispR
             Ui.Corner = CornerRadius;
             Anim.Speed = Animations == "Off" ? 0 : Animations == "Fast" ? 0.6 : Animations == "Relaxed" ? 1.45 : 1;
             Vinyl.Fixed = VinylStyle != "Random" && Enum.TryParse(VinylStyle, out Vinyl.Style st) ? st : (Vinyl.Style?)null;
+            Vinyl.Hidden = new HashSet<Vinyl.Style>(VinylHidden.Where(n => Enum.IsDefined(typeof(Vinyl.Style), n)).Select(n => (Vinyl.Style)Enum.Parse(typeof(Vinyl.Style), n)));
         }
 
         public void ResetAppearance()
@@ -212,6 +214,7 @@ namespace WispR
                     else if (k == "pin") { if (v.Length > 0) s.Pinned.Add(v); }
                     else if (k == "tbpin") { if (v.Length > 0) s.TaskbarPinned.Add(v); }
                     else if (k == "wpfav") { if (v.Length > 0) s.WallpaperHearts.Add(v); }
+                    else if (k == "vinylhide") { if (Enum.IsDefined(typeof(Vinyl.Style), v) && !s.VinylHidden.Contains(v)) s.VinylHidden.Add(v); }
                     else if (k.StartsWith("color.")) { try { colors[k.Substring(6)] = ColorTranslator.FromHtml(v); } catch { } }
                     else
                     {
@@ -279,6 +282,7 @@ namespace WispR
                 foreach (var p in Pinned) sb.AppendLine("pin=" + OneLine(p));
                 foreach (var p in TaskbarPinned) sb.AppendLine("tbpin=" + OneLine(p));
                 foreach (var p in WallpaperHearts) sb.AppendLine("wpfav=" + OneLine(p));
+                foreach (var p in VinylHidden) sb.AppendLine("vinylhide=" + OneLine(p));
                 // Write to a temporary file first and swap it in: a crash or power cut mid-save can't leave
                 // an empty settings file (which would also lose how to restore the Windows taskbar).
                 string tmp = FilePath + ".tmp";

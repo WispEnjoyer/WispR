@@ -23,14 +23,22 @@ namespace WispR
         /// <summary>The "Record look" setting: one style for every song, or null to pick one per song.</summary>
         public static Style? Fixed;
 
+        /// <summary>Looks the user switched off: never picked for a song (the "Records" picker in the Media tab).</summary>
+        public static HashSet<Style> Hidden = new HashSet<Style>();
+
+        /// <summary>A stable "random" look for a song (the same song always gets the same record), from the allowed ones.</summary>
         public static Style StyleFor(string key)
         {
             if (Fixed.HasValue) return Fixed.Value;
             int h = 17;
             foreach (char c in key ?? "") h = unchecked(h * 31 + c);
-            var all = (Style[])Enum.GetValues(typeof(Style));
-            return all[(h & 0x7fffffff) % all.Length];
+            var allowed = ((Style[])Enum.GetValues(typeof(Style))).Where(s => !Hidden.Contains(s)).ToArray();
+            if (allowed.Length == 0) return Style.Solid;
+            return allowed[(h & 0x7fffffff) % allowed.Length];
         }
+
+        /// <summary>A short summary of the rules that pick the look (part of the record's cache key).</summary>
+        public static string ChoiceKey => Fixed + "|" + string.Join(",", Hidden.OrderBy(s => s));
 
         static int Seed(string key)
         {
@@ -105,12 +113,12 @@ namespace WispR
             : Color.FromArgb(c.A, (int)(c.R * (1 + f)), (int)(c.G * (1 + f)), (int)(c.B * (1 + f)));
 
         /// <summary>The record (transparent outside the disc), <paramref name="size"/> pixels across.</summary>
-        public static Bitmap Render(Bitmap cover, string key, int size)
+        public static Bitmap Render(Bitmap cover, string key, int size, Style? look = null)
         {
             var cols = Colours(cover);
             while (cols.Count < 3) cols.Add(cols.Count == 0 ? Color.FromArgb(40, 40, 46) : Shade(cols[0], cols.Count == 1 ? 0.45f : -0.5f));
             var rnd = new Random(Seed(key));
-            var style = StyleFor(key);
+            var style = look ?? StyleFor(key);
             // a mostly dark/light cover: patterned pressings keep that tone as the base, but a solid
             // record takes the cover's main colour instead (an all-black record would show nothing of it)
             if (cols[0].GetSaturation() < 0.25f && style == Style.Solid && cols.Count > 1)

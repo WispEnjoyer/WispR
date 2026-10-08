@@ -165,7 +165,9 @@ live when you pick another one):
   plays. **Performance**: CPU, memory and GPU temperature as gauges with a 40-second graph each
   (GPU readings come from AMD's driver library; other GPUs show "unavailable"). Settings: on/off,
   the notch, how long the mouse rests before it opens, which tab it opens on, the record's speed,
-  and its look (a different pressing per song, or always the same one). It doesn't open while you
+  and its look (a different pressing per song, or always the same one). The palette icon at the end
+  of the Media tab's tab row shows all 24 record looks in the song's colours: click one to keep it
+  out of the per-song mix (or let it back in). It doesn't open while you
   drag a window to the top, or over fullscreen games and videos.
 - **On the bars** — which boxes and items show (Start, Task view, tray,
   keyboard layout, network, speed, volume, battery, notifications, clock, date, seconds,
