@@ -9,14 +9,17 @@ namespace WispR
 {
     /// <summary>
     /// A vinyl record for the playing song: coloured from its cover, in one of several pressings picked
-    /// per song (solid, splatter, swirl, smoke, galaxy, pinwheel, bullseye, marble, glitter, haze), with grooves, a label made from the cover
+    /// per song (see <see cref="Style"/>: 24 of them, from solid to holographic), with grooves, a label made from the cover
     /// and a centre hole. Rendered once per song; the panel just rotates the picture while it plays.
     /// </summary>
     static class Vinyl
     {
-        public enum Style { Solid, Splatter, Swirl, Smoke, Galaxy, Pinwheel, Bullseye, Marble, Glitter, Haze }
+        public enum Style
+        {
+            Solid, Splatter, Swirl, Smoke, Galaxy, Pinwheel, Bullseye, Marble, Glitter, Haze,
+            Aurora, TieDye, Lava, Confetti, Polka, Checker, Ripple, Holo, Terrazzo, Eclipse, Camo, Topo, Prism, Bloom,
+        }
 
-        /// <summary>A stable "random" design for a song (the same song always gets the same record).</summary>
         /// <summary>The "Record look" setting: one style for every song, or null to pick one per song.</summary>
         public static Style? Fixed;
 
@@ -93,6 +96,9 @@ namespace WispR
             float hh = h / 360f;
             return Color.FromArgb(c.A, (int)(Hue(hh + 1f / 3) * 255), (int)(Hue(hh) * 255), (int)(Hue(hh - 1f / 3) * 255));
         }
+
+        static Color Mix(Color a, Color b, float t) => Color.FromArgb(
+            (int)(a.A + (b.A - a.A) * t), (int)(a.R + (b.R - a.R) * t), (int)(a.G + (b.G - a.G) * t), (int)(a.B + (b.B - a.B) * t));
 
         static Color Shade(Color c, float f) => f >= 0
             ? Color.FromArgb(c.A, (int)(c.R + (255 - c.R) * f), (int)(c.G + (255 - c.G) * f), (int)(c.B + (255 - c.B) * f))
@@ -260,6 +266,298 @@ namespace WispR
                     var inner = Math.Abs(base0.GetBrightness() - c1.GetBrightness()) > 0.15f ? base0 : c2; // make sure the two differ
                     using (var hb = new PathGradientBrush(hp) { CenterPoint = new PointF(R, R), CenterColor = inner, SurroundColors = new[] { Color.FromArgb(0, inner) }, FocusScales = new PointF(0.62f, 0.62f) })
                         g.FillPath(hb, hp);
+                    break;
+                }
+
+                case Style.Aurora:
+                {
+                    // dark sky with soft, glowing curtains of light rising through it
+                    using (var b = new SolidBrush(Shade(base0.GetSaturation() < 0.25f ? base0 : c2, -0.7f))) g.FillEllipse(b, disc);
+                    for (int band = 0; band < 5; band++)
+                    {
+                        var col = band % 2 == 0 ? c1 : (cols.Count > 3 ? cols[3] : c2);
+                        double ph = rnd.NextDouble() * 6;
+                        float y0 = size * (0.2f + band * 0.15f);
+                        for (int layer = 0; layer < 6; layer++)
+                        {
+                            var pts = new List<PointF>();
+                            for (int k = 0; k <= 20; k++)
+                            {
+                                float xx = size * k / 20f;
+                                pts.Add(new PointF(xx, y0 + (float)(Math.Sin(k * 0.45 + ph) * size * 0.07) - layer * size * 0.012f));
+                            }
+                            using var pen = new Pen(Color.FromArgb(22 + layer * 6, col), size * (0.12f - layer * 0.016f)) { LineJoin = LineJoin.Round };
+                            g.DrawCurve(pen, pts.ToArray(), 0.5f);
+                        }
+                    }
+                    break;
+                }
+
+                case Style.TieDye:
+                {
+                    // wobbly rings of colour from the edge inwards, like a tie-dyed shirt
+                    var ring = new[] { base0, c1, c2, cols.Count > 3 ? cols[3] : Shade(c1, 0.35f) };
+                    int rings = 9;
+                    double wob = 4 + rnd.Next(3), ph = rnd.NextDouble() * 6;
+                    for (int i = 0; i < rings; i++)
+                    {
+                        float rr = R * (1.08f - i * 0.75f / rings);
+                        var pts = new PointF[48];
+                        for (int k = 0; k < pts.Length; k++)
+                        {
+                            double a = k * Math.PI * 2 / pts.Length;
+                            float w = rr * (1 + 0.07f * (float)Math.Sin(a * wob + ph + i * 0.7));
+                            pts[k] = new PointF(R + (float)Math.Cos(a) * w, R + (float)Math.Sin(a) * w);
+                        }
+                        using var b = new SolidBrush(ring[i % ring.Length]);
+                        g.FillClosedCurve(b, pts, FillMode.Alternate, 0.5f);
+                    }
+                    break;
+                }
+
+                case Style.Lava:
+                {
+                    // big soft blobs, like a lava lamp
+                    using (var b = new SolidBrush(Shade(base0, -0.3f))) g.FillEllipse(b, disc);
+                    for (int i = 0; i < 14; i++)
+                    {
+                        var col = i % 3 == 2 ? (cols.Count > 3 ? cols[3] : Shade(c1, 0.3f)) : i % 2 == 0 ? c1 : c2;
+                        // spread over the whole record (not off its edge)
+                        double ang = rnd.NextDouble() * Math.PI * 2, dist = R * Math.Sqrt(rnd.NextDouble()) * 0.85;
+                        float cx = R + (float)(Math.Cos(ang) * dist), cy = R + (float)(Math.Sin(ang) * dist), rad = size * (0.07f + (float)rnd.NextDouble() * 0.11f);
+                        using var bp = new GraphicsPath(); bp.AddEllipse(cx - rad, cy - rad * 1.2f, rad * 2, rad * 2.4f);
+                        using var bb = new PathGradientBrush(bp) { CenterColor = Shade(col, 0.25f), SurroundColors = new[] { Shade(col, -0.2f) }, FocusScales = new PointF(0.5f, 0.5f) };
+                        g.FillPath(bb, bp);
+                    }
+                    break;
+                }
+
+                case Style.Confetti:
+                {
+                    // little paper pieces at random angles
+                    using (var b = new SolidBrush(base0)) g.FillEllipse(b, disc);
+                    var pal = new[] { c1, c2, cols.Count > 3 ? cols[3] : Shade(c1, 0.4f), Color.FromArgb(235, 255, 255, 255) };
+                    for (int i = 0; i < 160; i++)
+                    {
+                        float cx = (float)rnd.NextDouble() * size, cy = (float)rnd.NextDouble() * size;
+                        float w = size * (0.012f + (float)rnd.NextDouble() * 0.018f), h = w * (0.4f + (float)rnd.NextDouble() * 0.5f);
+                        var st = g.Save();
+                        g.TranslateTransform(cx, cy);
+                        g.RotateTransform((float)rnd.NextDouble() * 360);
+                        using var cb = new SolidBrush(pal[rnd.Next(pal.Length)]);
+                        if (rnd.Next(3) == 0) g.FillPolygon(cb, new[] { new PointF(-w / 2, h / 2), new PointF(w / 2, h / 2), new PointF(0, -h) });
+                        else g.FillRectangle(cb, -w / 2, -h / 2, w, h);
+                        g.Restore(st);
+                    }
+                    break;
+                }
+
+                case Style.Polka:
+                {
+                    // neat rows of dots
+                    using (var b = new SolidBrush(base0)) g.FillEllipse(b, disc);
+                    float step = size / (9f + rnd.Next(4)), dot = step * 0.32f;
+                    using var db = new SolidBrush(c1);
+                    for (int row = 0; row * step < size + step; row++)
+                        for (float xx = (row % 2) * step / 2; xx < size + step; xx += step)
+                            g.FillEllipse(db, xx - dot, row * step - dot, dot * 2, dot * 2);
+                    break;
+                }
+
+                case Style.Checker:
+                {
+                    // a radial checkerboard, like a dartboard
+                    int seg = 12 + rnd.Next(3) * 4, rings = 5;
+                    for (int ri = 0; ri < rings; ri++)
+                    {
+                        float rr = R * (1 - ri * 0.62f / rings);
+                        for (int si = 0; si < seg; si++)
+                            using (var b = new SolidBrush((si + ri) % 2 == 0 ? base0 : c1))
+                                g.FillPie(b, R - rr, R - rr, rr * 2, rr * 2, si * 360f / seg, 360f / seg + 0.4f);
+                    }
+                    break;
+                }
+
+                case Style.Ripple:
+                {
+                    // rings of water spreading from a few drops and running into each other
+                    using (var b = new PathGradientBrush(discPath) { CenterColor = Shade(base0, 0.1f), SurroundColors = new[] { Shade(base0, -0.25f) } })
+                        g.FillEllipse(b, disc);
+                    for (int d = 0; d < 4; d++)
+                    {
+                        float cx = size * (0.2f + (float)rnd.NextDouble() * 0.6f), cy = size * (0.2f + (float)rnd.NextDouble() * 0.6f);
+                        var col = d % 2 == 0 ? c1 : c2;
+                        for (int k = 1; k <= 9; k++)
+                        {
+                            float rr = size * 0.045f * k;
+                            using var pen = new Pen(Color.FromArgb(Math.Max(20, 190 - k * 18), col), size * 0.008f);
+                            g.DrawEllipse(pen, cx - rr, cy - rr, rr * 2, rr * 2);
+                        }
+                    }
+                    break;
+                }
+
+                case Style.Holo:
+                {
+                    // holographic: an iridescent sweep around the disc, tinted by the cover, with a shimmer
+                    var stops = new[] { c1, c2, Shade(c1, 0.55f), cols.Count > 3 ? cols[3] : Shade(c2, 0.4f), c1 };
+                    int n = 180;
+                    for (int i = 0; i < n; i++)
+                    {
+                        float f = i / (float)n * (stops.Length - 1);
+                        int k = Math.Min(stops.Length - 2, (int)f);
+                        var col = Mix(stops[k], stops[k + 1], f - k);
+                        col = Mix(col, Color.White, 0.18f + 0.18f * (float)Math.Sin(i * Math.PI * 2 / n * 3));
+                        using var b = new SolidBrush(col);
+                        g.FillPie(b, disc.X, disc.Y, disc.Width, disc.Height, i * 360f / n, 360f / n + 0.6f);
+                    }
+                    for (int i = 0; i < 120; i++)
+                    {
+                        float sx = (float)rnd.NextDouble() * size, sy = (float)rnd.NextDouble() * size, sr = size * (0.002f + (float)rnd.NextDouble() * 0.003f);
+                        using var sb = new SolidBrush(Color.FromArgb(200, 255, 255, 255));
+                        g.FillEllipse(sb, sx - sr, sy - sr, sr * 2, sr * 2);
+                    }
+                    break;
+                }
+
+                case Style.Terrazzo:
+                {
+                    // stone chips of every colour set in a light or dark base
+                    var stone = base0.GetBrightness() > 0.5f ? Shade(base0, 0.5f) : Shade(base0, 0.15f);
+                    using (var b = new SolidBrush(stone)) g.FillEllipse(b, disc);
+                    var pal = new[] { c1, c2, Shade(c1, -0.35f), cols.Count > 3 ? cols[3] : Shade(c2, 0.35f), Shade(base0, -0.45f) };
+                    for (int i = 0; i < 120; i++)
+                    {
+                        float cx = (float)rnd.NextDouble() * size, cy = (float)rnd.NextDouble() * size, rad = size * (0.008f + (float)Math.Pow(rnd.NextDouble(), 1.8) * 0.04f);
+                        int corners = 4 + rnd.Next(3);
+                        var pts = new PointF[corners];
+                        for (int k = 0; k < corners; k++)
+                        {
+                            double a = k * Math.PI * 2 / corners + rnd.NextDouble() * 0.8;
+                            float rr = rad * (0.6f + (float)rnd.NextDouble() * 0.6f);
+                            pts[k] = new PointF(cx + (float)Math.Cos(a) * rr, cy + (float)Math.Sin(a) * rr);
+                        }
+                        using var cb = new SolidBrush(pal[rnd.Next(pal.Length)]);
+                        g.FillPolygon(cb, pts);
+                    }
+                    break;
+                }
+
+                case Style.Eclipse:
+                {
+                    // a dark disc with a glowing corona around the label
+                    using (var b = new SolidBrush(Color.FromArgb(14, 14, 18))) g.FillEllipse(b, disc);
+                    var glow = c1.GetSaturation() > 0.2f ? c1 : c2;
+                    using (var cp = new GraphicsPath())
+                    {
+                        cp.AddEllipse(disc);
+                        using var cb = new PathGradientBrush(cp)
+                        {
+                            CenterColor = Color.FromArgb(0, glow),
+                            SurroundColors = new[] { Color.FromArgb(0, glow) },
+                        };
+                        cb.InterpolationColors = new ColorBlend
+                        {
+                            Colors = new[] { Color.FromArgb(0, glow), Color.FromArgb(40, glow), Color.FromArgb(230, Shade(glow, 0.3f)), Color.FromArgb(0, glow), Color.FromArgb(0, glow) },
+                            Positions = new[] { 0f, 0.25f, 0.5f, 0.62f, 1f },
+                        };
+                        g.FillPath(cb, cp);
+                    }
+                    break;
+                }
+
+                case Style.Camo:
+                {
+                    // layered organic patches
+                    var pal = new[] { Shade(base0, -0.2f), Shade(c1, -0.15f), c2, Shade(base0, 0.25f) };
+                    using (var b = new SolidBrush(pal[0])) g.FillEllipse(b, disc);
+                    for (int i = 0; i < 46; i++)
+                    {
+                        float cx = (float)rnd.NextDouble() * size, cy = (float)rnd.NextDouble() * size, rad = size * (0.05f + (float)rnd.NextDouble() * 0.09f);
+                        var pts = new PointF[9];
+                        for (int k = 0; k < pts.Length; k++)
+                        {
+                            double a = k * Math.PI * 2 / pts.Length;
+                            float rr = rad * (0.55f + (float)rnd.NextDouble() * 0.7f);
+                            pts[k] = new PointF(cx + (float)Math.Cos(a) * rr * 1.3f, cy + (float)Math.Sin(a) * rr);
+                        }
+                        using var cb = new SolidBrush(pal[1 + i % 3]);
+                        g.FillClosedCurve(cb, pts, FillMode.Alternate, 0.55f);
+                    }
+                    break;
+                }
+
+                case Style.Topo:
+                {
+                    // contour lines of a map, flowing around a couple of hills
+                    using (var b = new SolidBrush(base0)) g.FillEllipse(b, disc);
+                    for (int hill = 0; hill < 3; hill++)
+                    {
+                        float cx = size * (0.15f + (float)rnd.NextDouble() * 0.7f), cy = size * (0.15f + (float)rnd.NextDouble() * 0.7f);
+                        double ph = rnd.NextDouble() * 6;
+                        for (int k = 1; k <= 8; k++)
+                        {
+                            float rr = size * 0.05f * k;
+                            var pts = new PointF[36];
+                            for (int p = 0; p < pts.Length; p++)
+                            {
+                                double a = p * Math.PI * 2 / pts.Length;
+                                float w = rr * (1 + 0.18f * (float)Math.Sin(a * 3 + ph + k * 0.3) + 0.08f * (float)Math.Sin(a * 5 - ph));
+                                pts[p] = new PointF(cx + (float)Math.Cos(a) * w, cy + (float)Math.Sin(a) * w);
+                            }
+                            using var pen = new Pen(Color.FromArgb(k % 4 == 0 ? 230 : 140, hill % 2 == 0 ? c1 : c2), size * (k % 4 == 0 ? 0.008f : 0.004f));
+                            g.DrawClosedCurve(pen, pts, 0.5f, FillMode.Alternate);
+                        }
+                    }
+                    break;
+                }
+
+                case Style.Prism:
+                {
+                    // low-poly crystal: a grid of shards, each a slightly different shade
+                    int cells = 7;
+                    float cell = size / (float)cells;
+                    var grid = new PointF[cells + 1, cells + 1];
+                    for (int y = 0; y <= cells; y++)
+                        for (int x = 0; x <= cells; x++)
+                            grid[x, y] = new PointF(x * cell + (x > 0 && x < cells ? (float)(rnd.NextDouble() - 0.5) * cell * 0.7f : 0),
+                                                    y * cell + (y > 0 && y < cells ? (float)(rnd.NextDouble() - 0.5) * cell * 0.7f : 0));
+                    for (int y = 0; y < cells; y++)
+                        for (int x = 0; x < cells; x++)
+                            for (int half = 0; half < 2; half++)
+                            {
+                                var tri = half == 0 ? new[] { grid[x, y], grid[x + 1, y], grid[x, y + 1] } : new[] { grid[x + 1, y], grid[x + 1, y + 1], grid[x, y + 1] };
+                                float f = (float)rnd.NextDouble();
+                                var col = Mix(Mix(base0, c1, f), c2, (float)rnd.NextDouble() * 0.5f);
+                                col = Shade(col, (float)(rnd.NextDouble() - 0.5) * 0.3f);
+                                using var b = new SolidBrush(col);
+                                g.FillPolygon(b, tri);
+                            }
+                    break;
+                }
+
+                case Style.Bloom:
+                {
+                    // a flower: rounds of petals opening around the label
+                    using (var b = new SolidBrush(Shade(base0, -0.15f))) g.FillEllipse(b, disc);
+                    int petals = 10 + rnd.Next(4);
+                    for (int round = 0; round < 3; round++)
+                    {
+                        var col = round == 0 ? c2 : round == 1 ? c1 : Shade(c1, 0.35f);
+                        float len = R * (0.98f - round * 0.2f), wide = len * 0.32f, off = round * 180f / petals;
+                        for (int i = 0; i < petals; i++)
+                        {
+                            var st = g.Save();
+                            g.TranslateTransform(R, R);
+                            g.RotateTransform(off + i * 360f / petals);
+                            using var pp = new GraphicsPath();
+                            pp.AddBezier(0, 0, wide, -len * 0.35f, wide * 0.6f, -len * 0.9f, 0, -len);
+                            pp.AddBezier(0, -len, -wide * 0.6f, -len * 0.9f, -wide, -len * 0.35f, 0, 0);
+                            using var pb = new PathGradientBrush(pp) { CenterPoint = new PointF(0, -len * 0.45f), CenterColor = Shade(col, 0.2f), SurroundColors = new[] { Shade(col, -0.2f) } };
+                            g.FillPath(pb, pp);
+                            g.Restore(st);
+                        }
+                    }
                     break;
                 }
 
