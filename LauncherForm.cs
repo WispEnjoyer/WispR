@@ -232,14 +232,14 @@ namespace WispR
 
         void OnWallpaperChosen(WallpaperPicker.Item item, bool alsoColours)
         {
-            string path = item.Path, weJson = item.WeJson, preset = settings.WallpaperPreset;
+            string path = item.Path, weJson = item.WeJson;
             System.Threading.Tasks.Task.Run(() =>
             {
                 bool ok = false;
                 if (weJson != null)
                 {
                     // Wallpaper Engine plays it — animations, effects and all
-                    try { ok = WallpaperEngine.Open(weJson, preset); } catch (Exception ex) { Log.Error("WallpaperEngine.Open", ex); }
+                    try { ok = WallpaperEngine.Open(weJson); } catch (Exception ex) { Log.Error("WallpaperEngine.Open", ex); }
                     if (!ok) Log.Write("Couldn't open " + weJson + " in Wallpaper Engine");
                 }
                 else

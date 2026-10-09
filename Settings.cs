@@ -83,7 +83,6 @@ namespace WispR
         public string SearchEngine = "Google";
         public string LauncherPosition = "Bottom"; // Bottom (above the taskbar) / Center / Top
         public string WallpaperSource = "Favorites"; // picker shows: Favorites (Wallpaper Engine ♥) / Engine (all of Wallpaper Engine) / All (+ pictures)
-        public string WallpaperPreset = "";     // Wallpaper Engine local preset loaded with each wallpaper ("" = none)
         public string WallpaperFolder = "";     // wallpapers shown when you type "wallpaper" ("" = automatic)
         public string AccountName = "Wisp";     // name shown in the Start menu (never the real account name)
         public bool ShowAccountPicture = true;  // your Windows account picture in the Start menu
@@ -256,9 +255,6 @@ namespace WispR
             if (!SearchEngines.ContainsKey(SearchEngine)) SearchEngine = "Google";
             if (LauncherPosition != "Center" && LauncherPosition != "Top") LauncherPosition = "Bottom";
             if (WallpaperSource != "Engine" && WallpaperSource != "All") WallpaperSource = "Favorites";
-            // goes on Wallpaper Engine's command line in quotes: no quotes or control characters
-            WallpaperPreset = new string((WallpaperPreset ?? "").Where(c => c != '"' && !char.IsControl(c)).ToArray()).Trim();
-            if (WallpaperPreset.Length > 100) WallpaperPreset = WallpaperPreset.Substring(0, 100);
             if (!PaletteModes.Contains(PaletteMode)) PaletteMode = "Auto";
             if (TaskbarEdge != "Top") TaskbarEdge = "Bottom";
             if (TaskbarAlign != "Left") TaskbarAlign = "Center";
