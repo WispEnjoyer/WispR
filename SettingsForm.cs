@@ -542,8 +542,12 @@ namespace WispR
                     () => st.ShowNotch, v => st.ShowNotch = v),
                 Row("Opens after", "How long the mouse rests at the edge first (longer = fewer accidental openings)",
                     Slider(0, 600, 10, () => st.TopPanelDelay, v => st.TopPanelDelay = v, v => v == 0 ? "At once" : v + " ms", 180)),
-                Row("Opens on", null, Choice(new[] { "Auto", "Media", "Performance", "Last" },
-                    new[] { "Media while something plays", "Media", "Performance", "Where I left it" }, () => st.TopPanelTab, v => st.TopPanelTab = v, 220)));
+                Row("Opens on", LumenR.Installed ? "Auto: LumenR while an episode plays there, Media while music plays" : null,
+                    LumenR.Installed
+                    ? Choice(new[] { "Auto", "Media", "LumenR", "Performance", "Last" },
+                        new[] { "What's playing", "Media", "LumenR", "Performance", "Where I left it" }, () => st.TopPanelTab, v => st.TopPanelTab = v, 220)
+                    : Choice(new[] { "Auto", "Media", "Performance", "Last" },
+                        new[] { "Media while something plays", "Media", "Performance", "Where I left it" }, () => st.TopPanelTab, v => st.TopPanelTab = v, 220)));
 
             Section(page, "Media");
             var looks = new[] { "Random" }.Concat(Enum.GetNames(typeof(Vinyl.Style))).ToArray();

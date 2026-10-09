@@ -79,6 +79,7 @@ namespace WispR
         public TrayContext()
         {
             settings = Settings.Load();
+            ThemeExport.Write(settings.Theme);
             backdrop = new Backdrop(settings);
             backdrop.Refresh();
             var usage = new Usage();

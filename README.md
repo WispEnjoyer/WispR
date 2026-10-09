@@ -27,6 +27,7 @@ animated at your monitor's refresh rate.
 - **Top drop-down** — touch the notch at the top edge for
   - 🎵 **Media**: cover, a spinning vinyl coloured from the cover, a seekable waveform
   - 📊 **Performance**: CPU, memory and GPU temperature
+  - 🎬 **LumenR**: what you're watching and what's next, when the [LumenR](https://github.com/WispEnjoyer/LumenR) add-on is installed
 - **Timers** — `set timer 10m` in the launcher; a small widget on the right edge shows them and slides out when you touch it
 - **Wallpapers** — a carousel of your pictures or Wallpaper Engine favourites
 - **Themes** — 8 built-in themes, your own colours, or colours taken from your wallpaper
@@ -160,6 +161,12 @@ live when you pick another one):
   launcher grows out of its top edge. It steps aside while a window is maximized on that screen
   (the window fills the screen as usual, above the bars). Clicks pass through it; it hides for
   fullscreen apps and with the double-tap, like the bars.
+- **LumenR add-on** — [LumenR](https://github.com/WispEnjoyer/LumenR) is a player for your anime and
+  movie folders (through your own mpv, with MyAnimeList sync). Once it has run once, WispR finds it and
+  the drop-down gets a **LumenR** tab: the episode playing right now with its progress, and posters of
+  the shows you're in the middle of. Click a poster to continue that show (next episode, or where you
+  stopped), the playing card to open its page, "Open LumenR" for the app. LumenR uses WispR's colours
+  while WispR runs, so both follow your wallpaper together. Each app works fine without the other.
 - **Drop-down** — the panel that slides down when the mouse rests at the top edge of the screen
   (marked by a notch). **Media**: cover, title, artist, a waveform you can click or drag to seek,
   and previous / play-pause / next; a vinyl record coloured from the cover spins while the song
@@ -340,6 +347,7 @@ The exe lands in `bin\Release\net48\`.
 | `Playhead.cs` | WispR's own clock for the song position, so junk reports from apps can't reset it |
 | `VolumePopup.cs` | The volume slider popup and its mixer |
 | `AppMixer.cs` | Per-app volumes (the apps playing sound) |
+| `LumenR.cs` | The LumenR add-on: finding it, its status, starting it; sharing WispR's colours |
 | `Calculator.cs` | Maths and unit conversion in the launcher |
 | `SettingsCatalog.cs` | Windows settings pages the launcher can open |
 | `CalendarPopup.cs` | The clock / calendar popup |

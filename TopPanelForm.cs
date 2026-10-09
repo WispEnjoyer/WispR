@@ -53,10 +53,13 @@ namespace WispR
         bool open, closing;
 
         // ---- state ----
-        int tab;                   // 0 = Media, 1 = Performance
+        int tab;                   // 0 = Media, 1 = Performance, 2 = LumenR (only when it's installed)
         bool tabChosen;            // the user picked a tab during this session
-        readonly string[] tabs = { "Media", "Performance" };
-        readonly string[] tabGlyphs = { "\uE8D6", "\uE9D9" };
+        readonly string[] tabs = { "Media", "Performance", "LumenR" };
+        readonly string[] tabGlyphs = { "\uE8D6", "\uE9D9", "\uE8B2" };
+        LumenR.State lumen;        // what LumenR reports (null: not installed)
+        /// <summary>The tabs shown, in order: LumenR sits between Media and Performance when it's there.</summary>
+        int[] VisibleTabs => lumen != null ? new[] { 0, 2, 1 } : new[] { 0, 1 };
         Point mouse = new Point(-1, -1);
         bool seeking; float seekFrac;
         DateTime seekHoldUntil; long seekTargetTicks; DateTime seekAt;
@@ -103,7 +106,11 @@ namespace WispR
             media.Paused = true; // only reads while open
             media.Updated += i => { if (IsHandleCreated && !IsDisposed) BeginInvoke((Action)(() => ApplyMedia(i))); };
             watch.Tick += (o, e) => Watch();
-            tick.Tick += (o, e) => { Sample(); if (Anim.FramesRunning(SpinKey)) layersDirty = true; else Redraw(); UpdateSpin(); };
+            tick.Tick += (o, e) =>
+            {
+                lumen = LumenR.Read(); // cheap: re-read only when LumenR wrote something new
+                if (tab == 2 && lumen == null) tab = 0;
+                Sample(); if (Anim.FramesRunning(SpinKey)) layersDirty = true; else Redraw(); UpdateSpin(); };
         }
 
         protected override bool ShowWithoutActivation => true;
@@ -217,13 +224,19 @@ namespace WispR
             panelCenterX = scr.Bounds.X + scr.Bounds.Width / 2;
             screenRect = new Rectangle(panelCenterX - w / 2, edge, w, CurrentH);
             open = true; closing = false; outsideSince = DateTime.MinValue;
+            lumen = LumenR.Read();
             switch (settings.TopPanelTab)
             {
                 case "Media": tab = 0; break;
                 case "Performance": tab = 1; break;
+                case "LumenR": tab = 2; break;
                 case "Last": break; // where you left it
-                default: if (!tabChosen) tab = info != null ? 0 : 1; break; // something playing → Media first
+                default:
+                    // something playing → Media first; an episode in LumenR → LumenR
+                    if (!tabChosen) tab = LumenR.Playing != null ? 2 : info != null ? 0 : 1;
+                    break;
             }
+            if (tab == 2 && lumen == null) tab = info != null ? 0 : 1;
             media.Paused = false;
             Sample();
             BuildFonts();
@@ -254,6 +267,8 @@ namespace WispR
                 Anim.Stop("top-panel-picker");
                 foreach (var b in lookThumbs.Values) b.Dispose();
                 lookThumbs.Clear(); lookThumbsKey = null;
+                foreach (var b in posters.Values) b?.Dispose();
+                posters.Clear();
             }
             if (now) { Anim.Stop(this); Done(); return; }
             float from = slide;
@@ -434,6 +449,7 @@ namespace WispR
                 DrawTabs(g, new Rectangle(body.X + (int)(24 * s), (int)(6 * s), body.Width - (int)(48 * s), TabH));
                 if (tab == 0 && recordsOpen) DrawRecords(g, content);
                 else if (tab == 0) DrawMedia(g, content, 0);
+                else if (tab == 2) DrawLumen(g, content);
                 else DrawPerformance(g, content);
             }
             using (var g = NewGraphics(over))
@@ -510,10 +526,12 @@ namespace WispR
 
         void DrawTabs(Graphics g, Rectangle r)
         {
-            int n = tabs.Length, w = r.Width / n;
-            for (int i = 0; i < n; i++)
+            var order = VisibleTabs;
+            int n = order.Length, w = r.Width / n;
+            for (int k = 0; k < n; k++)
             {
-                var cell = new Rectangle(r.X + i * w, r.Y, w, r.Height);
+                int i = order[k];
+                var cell = new Rectangle(r.X + k * w, r.Y, w, r.Height);
                 bool sel = i == tab, hot = cell.Contains(mouse);
                 var col = sel ? T.Accent : hot ? T.Text : T.SubText;
                 DrawText(g, tabGlyphs[i], tabGlyphFont, new Rectangle(cell.X, cell.Y + (int)(4 * s), cell.Width, (int)(24 * s)), col);
@@ -911,6 +929,157 @@ namespace WispR
         void UpdateSpin()
         {
             if (open && tab == 0 && info != null && !recordsOpen && !Anim.FramesRunning(SpinKey)) { lastSpin = DateTime.Now; Anim.Frames(SpinKey, SpinFrame); }
+        }
+
+        // ---- LumenR ----
+
+        readonly Dictionary<string, Bitmap> posters = new Dictionary<string, Bitmap>();
+
+        /// <summary>
+        /// The LumenR add-on: what's playing there (if anything) and the shows you're in the middle of,
+        /// as posters. A poster continues that show (next episode, or resume); "Open LumenR" opens the app.
+        /// </summary>
+        void DrawLumen(Graphics g, Rectangle r)
+        {
+            var st = lumen;
+            var now = LumenR.Playing;
+            int headH = (int)(24 * s), gap = (int)(14 * s);
+
+            // header: what this is, and a way into the app
+            DrawText(g, now != null ? "NOW WATCHING" : "CONTINUE WATCHING", labelFont, new Rectangle(r.X, r.Y, r.Width / 2, headH), T.SubText, left: true);
+            string openText = "Open LumenR  \u203A";
+            var openSize = g.MeasureString(openText, textFont);
+            var openR = new Rectangle(r.Right - (int)openSize.Width - (int)(14 * s), r.Y - (int)(3 * s), (int)openSize.Width + (int)(14 * s), headH + (int)(6 * s));
+            bool openHot = openR.Contains(mouse);
+            if (openHot) using (var p = Ui.Round(openR, openR.Height / 2f)) using (var b = new SolidBrush(Color.FromArgb(50, T.Accent))) g.FillPath(b, p);
+            DrawText(g, openText, textFont, openR, openHot ? T.Accent : T.Text);
+            buttons.Add((openR, () => { LumenR.Open(); ClosePanel(false); }));
+
+            var row = new Rectangle(r.X, r.Y + headH + (int)(10 * s), r.Width, r.Bottom - (r.Y + headH + (int)(10 * s)));
+            int textH = (int)(36 * s);
+            int ph = row.Height - textH, pw = ph * 2 / 3;
+            int x = row.X;
+
+            if (now != null)
+            {
+                // the episode playing: its poster, what it is, how far along
+                int cardW = Math.Min(row.Width, pw + (int)(300 * s));
+                var card = new Rectangle(x, row.Y, cardW, row.Height);
+                bool hot = card.Contains(mouse);
+                using (var p = Ui.Round(card, 14 * s))
+                {
+                    using (var b = new SolidBrush(Color.FromArgb(T.IsLight ? 150 : 110, hot ? T.Selection : T.Surface))) g.FillPath(b, p);
+                    using (var pen = new Pen(Color.FromArgb(hot ? 120 : 40, hot ? T.Accent : T.Text))) g.DrawPath(pen, p);
+                }
+                int pad = (int)(10 * s);
+                var pr = new Rectangle(card.X + pad, card.Y + pad, (card.Height - pad * 2) * 2 / 3, card.Height - pad * 2);
+                DrawPoster(g, pr, now.Poster, now.Title, 0);
+                int tx = pr.Right + (int)(16 * s), tw = card.Right - tx - (int)(16 * s);
+                int ty = card.Y + (int)(18 * s);
+                DrawText(g, now.Title, titleFont, new Rectangle(tx, ty, tw, (int)(30 * s)), T.Text, left: true);
+                string ep = now.Episode + (now.EpisodeTitle.Length > 0 ? (now.Episode.Length > 0 ? "  ·  " : "") + now.EpisodeTitle : "");
+                if (ep.Length > 0) DrawText(g, ep, textFont, new Rectangle(tx, ty + (int)(32 * s), tw, (int)(22 * s)), T.SubText, left: true);
+                // progress
+                int by = card.Bottom - (int)(44 * s), bh = Math.Max(3, (int)(4 * s));
+                var bar = new Rectangle(tx, by, tw, bh);
+                float f = now.Dur > 0 ? (float)Math.Max(0, Math.Min(1, now.Pos / now.Dur)) : 0;
+                using (var p = Ui.Round(bar, bh / 2f)) using (var b = new SolidBrush(Color.FromArgb(60, T.Text))) g.FillPath(b, p);
+                if (f > 0) using (var p = Ui.Round(new RectangleF(bar.X, bar.Y, Math.Max(bh, bar.Width * f), bh), bh / 2f)) using (var b = new SolidBrush(T.Accent)) g.FillPath(b, p);
+                if (now.Dur > 0)
+                {
+                    DrawText(g, Time(TimeSpan.FromSeconds(now.Pos)), smallFont, new Rectangle(tx, by + (int)(8 * s), tw / 2, (int)(18 * s)), T.SubText, left: true);
+                    DrawText(g, "-" + Time(TimeSpan.FromSeconds(Math.Max(0, now.Dur - now.Pos))), smallFont, new Rectangle(tx + tw / 2, by + (int)(8 * s), tw / 2, (int)(18 * s)), T.SubText, right: true);
+                }
+                string key = now.Key;
+                buttons.Add((card, () => { LumenR.OpenShow(key); ClosePanel(false); }));
+                x = card.Right + gap;
+            }
+
+            var shows = (st?.Continue ?? new List<LumenR.Show>()).Where(c => now == null || c.Key != now.Key).ToList();
+            if (shows.Count == 0)
+            {
+                if (now == null)
+                    DrawText(g, "Nothing in progress. Open LumenR and pick something to watch.", textFont,
+                             new Rectangle(row.X, row.Y + row.Height / 2 - (int)(14 * s), row.Width, (int)(28 * s)), T.SubText);
+                return;
+            }
+            int cw = pw, cgap = (int)(16 * s);
+            foreach (var show in shows)
+            {
+                if (x + cw > row.Right) break;
+                var cell = new Rectangle(x, row.Y, cw, row.Height);
+                var pr = new Rectangle(x, row.Y, cw, ph);
+                bool hot = cell.Contains(mouse);
+                DrawPoster(g, pr, show.Poster, show.Title, show.Total > 0 && show.Watched > 0 ? show.Watched / (float)show.Total : 0, hot);
+                DrawText(g, show.Title, sideFont, new Rectangle(x - (int)(2 * s), pr.Bottom + (int)(4 * s), cw + (int)(4 * s), (int)(18 * s)), T.Text);
+                DrawText(g, show.Label, smallFont, new Rectangle(x - (int)(6 * s), pr.Bottom + (int)(21 * s), cw + (int)(12 * s), (int)(15 * s)), hot ? T.Accent : T.SubText);
+                string key = show.Key;
+                buttons.Add((cell, () => { LumenR.PlayNext(key); ClosePanel(false); }));
+                x += cw + cgap;
+            }
+        }
+
+        /// <summary>A poster with rounded corners (a placeholder with initials when there's no picture), a thin bar for how much is watched, and a play button on hover.</summary>
+        void DrawPoster(Graphics g, Rectangle r, string path, string title, float watched, bool hot = false)
+        {
+            float rad = Math.Min(10 * s, Ui.CornerPx(s) * 0.7f);
+            using var shape = Ui.Round(r, rad);
+            var pic = Poster(path, r.Width, r.Height);
+            var clip = g.Clip;
+            g.SetClip(shape, CombineMode.Intersect);
+            if (pic != null) g.DrawImageUnscaled(pic, r.X, r.Y);
+            else
+            {
+                using (var b = new LinearGradientBrush(r, Ui.Mix(T.Surface, T.Accent, 0.35f), Ui.Mix(T.Background, T.Accent, 0.12f), 70f)) g.FillRectangle(b, r);
+                string initials = new string((title ?? "").Split(new[] { ' ', '-', ':' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Where(w2 => char.IsLetterOrDigit(w2[0])).Take(2).Select(w2 => char.ToUpperInvariant(w2[0])).ToArray());
+                DrawText(g, initials, valueFont, r, Color.FromArgb(200, T.Text));
+            }
+            if (watched > 0)
+            {
+                int bh = Math.Max(3, (int)(4 * s));
+                using (var b = new SolidBrush(Color.FromArgb(150, 0, 0, 0))) g.FillRectangle(b, r.X, r.Bottom - bh, r.Width, bh);
+                using (var b = new SolidBrush(T.Accent)) g.FillRectangle(b, r.X, r.Bottom - bh, Math.Max(bh, r.Width * Math.Min(1, watched)), bh);
+            }
+            if (hot)
+            {
+                using (var b = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillRectangle(b, r);
+                float d = Math.Min(r.Width, r.Height) * 0.34f;
+                var c = new RectangleF(r.X + (r.Width - d) / 2f, r.Y + (r.Height - d) / 2f, d, d);
+                using (var b = new SolidBrush(T.Accent)) g.FillEllipse(b, c);
+                float t3 = d * 0.2f, cx = c.X + c.Width / 2 + t3 * 0.15f, cy = c.Y + c.Height / 2;
+                using (var b = new SolidBrush(T.IsLight || T.Accent.GetBrightness() > 0.7f ? Color.FromArgb(20, 20, 20) : Color.White))
+                    g.FillPolygon(b, new[] { new PointF(cx - t3 * 0.8f, cy - t3), new PointF(cx - t3 * 0.8f, cy + t3), new PointF(cx + t3, cy) });
+            }
+            g.Clip = clip;
+            using (var pen = new Pen(Color.FromArgb(hot ? 160 : 40, hot ? T.Accent : T.Text), hot ? 2f : 1f)) g.DrawPath(pen, shape);
+        }
+
+        /// <summary>A poster picture cut to exactly w×h (cover), cached while the panel is open.</summary>
+        Bitmap Poster(string path, int w, int h)
+        {
+            if (string.IsNullOrEmpty(path) || w <= 0 || h <= 0) return null;
+            string key = path + "|" + w + "x" + h;
+            if (posters.TryGetValue(key, out var bmp)) return bmp;
+            Bitmap result = null;
+            try
+            {
+                if (File.Exists(path))
+                    using (var src = ImageLoad.FromFile(path, Math.Max(w, h) * 2))
+                    {
+                        result = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
+                        using var g = Graphics.FromImage(result);
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                        float sc = Math.Max(w / (float)src.Width, h / (float)src.Height);
+                        float dw = src.Width * sc, dh = src.Height * sc;
+                        g.DrawImage(src, new RectangleF((w - dw) / 2f, (h - dh) / 2f, dw, dh));
+                    }
+            }
+            catch { result?.Dispose(); result = null; }
+            if (posters.Count > 60) { foreach (var b in posters.Values) b?.Dispose(); posters.Clear(); }
+            posters[key] = result;
+            return result;
         }
 
         // ---- Performance ----

@@ -106,7 +106,7 @@ namespace WispR
         public bool TopPanel = true;
         public bool ShowNotch = true;          // the little tab at the top edge that marks the drop-down
         public int TopPanelDelay = 90;         // ms the mouse rests at the top edge before the drop-down opens
-        public string TopPanelTab = "Auto";    // which tab it opens on: Auto (Media while something plays) / Media / Performance / Last
+        public string TopPanelTab = "Auto";    // which tab it opens on: Auto (Media while something plays) / Media / Performance / LumenR / Last
         public string VinylStyle = "Random";   // the record's look: Random (picked per song) or one style for all
         public int CornerRadius = 16;          // roundness of the launcher, popups, drop-down, timers and frame (0-28)
         public string Animations = "Normal";   // Off / Fast / Normal / Relaxed
@@ -249,7 +249,7 @@ namespace WispR
             TopPanelDelay = Clamp(TopPanelDelay, 0, 600);
             CornerRadius = Clamp(CornerRadius, 0, 28);
             LauncherRows = Clamp(LauncherRows, 4, 12);
-            if (TopPanelTab != "Media" && TopPanelTab != "Performance" && TopPanelTab != "Last") TopPanelTab = "Auto";
+            if (TopPanelTab != "Media" && TopPanelTab != "Performance" && TopPanelTab != "LumenR" && TopPanelTab != "Last") TopPanelTab = "Auto";
             if (Animations != "Off" && Animations != "Fast" && Animations != "Relaxed") Animations = "Normal";
             if (VinylStyle != "Random" && !Enum.GetNames(typeof(Vinyl.Style)).Contains(VinylStyle)) VinylStyle = "Random";
             if (!SearchEngines.ContainsKey(SearchEngine)) SearchEngine = "Google";
@@ -266,6 +266,7 @@ namespace WispR
 
         public void Save()
         {
+            ThemeExport.Write(Theme); // for add-ons (LumenR) that follow WispR's colours
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
