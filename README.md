@@ -32,6 +32,16 @@ animated at your monitor's refresh rate.
 - **Wallpapers** — a carousel of your pictures or Wallpaper Engine favourites
 - **Themes** — 8 built-in themes, your own colours, or colours taken from your wallpaper
 
+## 🧩 Add-ons
+
+<a href="https://github.com/WispEnjoyer/LumenR"><img src="https://raw.githubusercontent.com/WispEnjoyer/LumenR/main/docs/logo.png" width="56" align="left" alt="LumenR logo"></a>
+
+**[LumenR](https://github.com/WispEnjoyer/LumenR)** turns your anime and movie folders into a poster wall that plays
+through your own mpv and syncs with MyAnimeList. Once it's installed, WispR's drop-down gets a LumenR tab:
+what's playing, and the shows you're in the middle of, one click from the next episode.
+
+<br clear="left">
+
 ## 🚀 Getting started
 
 1. Download **WispR.zip** from the [latest release](../../releases/latest) and unzip it somewhere permanent.
