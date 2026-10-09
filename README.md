@@ -321,6 +321,9 @@ dotnet build -c Release
 
 The exe lands in `bin\Release\net48\`.
 
+Releases are built by GitHub Actions (`.github/workflows/release.yml`) whenever a version tag such as
+`v1.1.0` is pushed: it builds `WispR.exe` on Windows and attaches it and `WispR.zip` to the release.
+
 <details>
 <summary><b>What each file does</b></summary>
 

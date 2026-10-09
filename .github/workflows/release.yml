@@ -1,0 +1,47 @@
+# Builds WispR.exe on Windows and publishes it as a GitHub release.
+# Runs when a version tag is pushed (git tag v1.2.0 && git push origin v1.2.0), or by hand from the Actions tab.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to publish, e.g. v1.0.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build WispR.exe
+        run: dotnet build WispR.csproj -c Release -o out
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force pkg | Out-Null
+          Copy-Item out/WispR.exe, README.md, "Restore Windows taskbar.bat" pkg/
+          Compress-Archive -Path pkg/* -DestinationPath WispR.zip
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: WispR ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            WispR.zip
+            out/WispR.exe
+          generate_release_notes: true
+          body: |
+            **Download `WispR.zip`** (or just `WispR.exe`), put it anywhere and run it. Nothing to install: it uses .NET Framework 4.8, which every Windows 10/11 has.
+
+            `Restore Windows taskbar.bat` (in the zip) brings the Windows taskbar back if WispR ever can't.
+            Optional add-on: [LumenR](https://github.com/WispEnjoyer/LumenR), a player for your anime and movies that shows up in WispR's drop-down.
+
+            Windows may warn about an unknown publisher the first time (the app isn't code-signed): choose *More info → Run anyway*.
